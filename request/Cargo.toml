@@ -1,0 +1,8 @@
+[package]
+name = "request"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+serde = { version = "1.0.217", features = ["derive"] }
+void = "1.0.2"
