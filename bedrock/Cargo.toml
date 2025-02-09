@@ -1,0 +1,8 @@
+[package]
+name = "bedrock"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+aws-sdk-bedrockruntime = "1.73.0"
+request = { path = "../request" }
