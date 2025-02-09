@@ -1,33 +1,38 @@
 use aws_sdk_bedrockruntime::types::{ContentBlock, SystemContentBlock};
 use request::{Content, Contents};
 
-pub trait ContentsConverter {
-    fn to_content_blocks(&self) -> Vec<ContentBlock>;
-    fn to_system_content_blocks(&self) -> Vec<SystemContentBlock>;
+pub trait IntoContentBlocks {
+    fn into_content_blocks(self) -> Vec<ContentBlock>;
 }
 
-impl ContentsConverter for Contents {
-    fn to_content_blocks(&self) -> Vec<ContentBlock> {
+pub trait IntoSystemContentBlocks {
+    fn into_system_content_blocks(self) -> Vec<SystemContentBlock>;
+}
+
+impl IntoContentBlocks for Contents {
+    fn into_content_blocks(self) -> Vec<ContentBlock> {
         match self {
             Contents::Array(arr) => arr
-                .iter()
+                .into_iter()
                 .map(|c| match c {
-                    Content::Text { text } => ContentBlock::Text(text.clone()),
+                    Content::Text { text } => ContentBlock::Text(text),
                 })
                 .collect(),
-            Contents::String(s) => vec![ContentBlock::Text(s.clone())],
+            Contents::String(s) => vec![ContentBlock::Text(s)],
         }
     }
+}
 
-    fn to_system_content_blocks(&self) -> Vec<SystemContentBlock> {
+impl IntoSystemContentBlocks for Contents {
+    fn into_system_content_blocks(self) -> Vec<SystemContentBlock> {
         match self {
             Contents::Array(arr) => arr
-                .iter()
+                .into_iter()
                 .map(|c| match c {
-                    Content::Text { text } => SystemContentBlock::Text(text.clone()),
+                    Content::Text { text } => SystemContentBlock::Text(text),
                 })
                 .collect(),
-            Contents::String(s) => vec![SystemContentBlock::Text(s.clone())],
+            Contents::String(s) => vec![SystemContentBlock::Text(s)],
         }
     }
 }

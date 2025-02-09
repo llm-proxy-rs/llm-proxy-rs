@@ -1,3 +1,6 @@
+use aws_sdk_bedrockruntime::types::{
+    ContentBlockDelta, ConversationRole, ConverseStreamOutput, StopReason,
+};
 use serde::Serialize;
 
 #[derive(Debug, Serialize)]
@@ -14,7 +17,7 @@ pub struct ChatCompletionsResponse {
 pub struct Choice {
     pub delta: Option<Delta>,
     pub finish_reason: Option<String>,
-    pub index: u32,
+    pub index: i32,
     pub logprobs: Option<String>,
 }
 
@@ -27,9 +30,9 @@ pub enum Delta {
 
 #[derive(Debug, Default, Serialize)]
 pub struct Usage {
-    pub completion_tokens: u32,
-    pub prompt_tokens: u32,
-    pub total_tokens: u32,
+    pub completion_tokens: i32,
+    pub prompt_tokens: i32,
+    pub total_tokens: i32,
 }
 
 impl ChatCompletionsResponse {
@@ -54,28 +57,28 @@ impl ChatCompletionsResponseBuilder {
         self
     }
 
-    pub fn created(mut self, created: u64) -> Self {
-        self.created = Some(created);
+    pub fn created(mut self, created: Option<u64>) -> Self {
+        self.created = created;
         self
     }
 
-    pub fn id(mut self, id: String) -> Self {
-        self.id = Some(id);
+    pub fn id(mut self, id: Option<String>) -> Self {
+        self.id = id;
         self
     }
 
-    pub fn model(mut self, model: String) -> Self {
-        self.model = Some(model);
+    pub fn model(mut self, model: Option<String>) -> Self {
+        self.model = model;
         self
     }
 
-    pub fn object(mut self, object: String) -> Self {
-        self.object = Some(object);
+    pub fn object(mut self, object: Option<String>) -> Self {
+        self.object = object;
         self
     }
 
-    pub fn usage(mut self, usage: Usage) -> Self {
-        self.usage = Some(usage);
+    pub fn usage(mut self, usage: Option<Usage>) -> Self {
+        self.usage = usage;
         self
     }
 
@@ -95,28 +98,28 @@ impl ChatCompletionsResponseBuilder {
 pub struct ChoiceBuilder {
     pub delta: Option<Delta>,
     pub finish_reason: Option<String>,
-    pub index: u32,
+    pub index: i32,
     pub logprobs: Option<String>,
 }
 
 impl ChoiceBuilder {
-    pub fn delta(mut self, delta: Delta) -> Self {
-        self.delta = Some(delta);
+    pub fn delta(mut self, delta: Option<Delta>) -> Self {
+        self.delta = delta;
         self
     }
 
-    pub fn finish_reason(mut self, reason: String) -> Self {
-        self.finish_reason = Some(reason);
+    pub fn finish_reason(mut self, reason: Option<String>) -> Self {
+        self.finish_reason = reason;
         self
     }
 
-    pub fn index(mut self, index: u32) -> Self {
+    pub fn index(mut self, index: i32) -> Self {
         self.index = index;
         self
     }
 
-    pub fn logprobs(mut self, logprobs: String) -> Self {
-        self.logprobs = Some(logprobs);
+    pub fn logprobs(mut self, logprobs: Option<String>) -> Self {
+        self.logprobs = logprobs;
         self
     }
 
@@ -132,23 +135,23 @@ impl ChoiceBuilder {
 
 #[derive(Default)]
 pub struct UsageBuilder {
-    pub completion_tokens: u32,
-    pub prompt_tokens: u32,
-    pub total_tokens: u32,
+    pub completion_tokens: i32,
+    pub prompt_tokens: i32,
+    pub total_tokens: i32,
 }
 
 impl UsageBuilder {
-    pub fn completion_tokens(mut self, tokens: u32) -> Self {
+    pub fn completion_tokens(mut self, tokens: i32) -> Self {
         self.completion_tokens = tokens;
         self
     }
 
-    pub fn prompt_tokens(mut self, tokens: u32) -> Self {
+    pub fn prompt_tokens(mut self, tokens: i32) -> Self {
         self.prompt_tokens = tokens;
         self
     }
 
-    pub fn total_tokens(mut self, tokens: u32) -> Self {
+    pub fn total_tokens(mut self, tokens: i32) -> Self {
         self.total_tokens = tokens;
         self
     }
@@ -159,5 +162,66 @@ impl UsageBuilder {
             completion_tokens: self.completion_tokens,
             total_tokens: self.total_tokens,
         }
+    }
+}
+
+impl From<ConverseStreamOutput> for ChatCompletionsResponseBuilder {
+    fn from(output: ConverseStreamOutput) -> Self {
+        let mut builder = ChatCompletionsResponse::builder();
+
+        match output {
+            ConverseStreamOutput::ContentBlockDelta(event) => {
+                let delta = event
+                    .delta
+                    .and_then(|d| match d {
+                        ContentBlockDelta::Text(text) => Some(text),
+                        _ => None,
+                    })
+                    .map(|content| Delta::Content { content });
+
+                let choice = ChoiceBuilder::default()
+                    .delta(delta)
+                    .index(event.content_block_index)
+                    .build();
+
+                builder = builder.choice(choice);
+            }
+            ConverseStreamOutput::MessageStart(event) => {
+                let choice = ChoiceBuilder::default()
+                    .delta(match event.role {
+                        ConversationRole::Assistant => Some(Delta::Role {
+                            role: "assistant".to_string(),
+                        }),
+                        _ => None,
+                    })
+                    .build();
+
+                builder = builder.choice(choice);
+            }
+            ConverseStreamOutput::MessageStop(event) => {
+                let choice = ChoiceBuilder::default()
+                    .finish_reason(match event.stop_reason {
+                        StopReason::EndTurn => Some("stop".to_string()),
+                        _ => None,
+                    })
+                    .build();
+
+                builder = builder.choice(choice);
+            }
+            ConverseStreamOutput::Metadata(event) => {
+                let usage = event.usage.map(|u| {
+                    UsageBuilder::default()
+                        .completion_tokens(u.output_tokens)
+                        .prompt_tokens(u.input_tokens)
+                        .total_tokens(u.total_tokens)
+                        .build()
+                });
+
+                builder = builder.usage(usage);
+            }
+            _ => {}
+        }
+
+        builder
     }
 }

@@ -1,6 +1,6 @@
 [workspace]
 
 members = [
-    "bedrock",
+    "bedrock", "chat",
     "request", "response",
 ]
