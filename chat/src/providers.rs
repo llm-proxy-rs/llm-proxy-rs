@@ -5,7 +5,9 @@ use axum::response::sse::{Event, Sse};
 use chrono::offset::Utc;
 use futures::stream::Stream;
 use request::ChatCompletionsRequest;
-use response::{ChatCompletionsResponse, ChatCompletionsResponseBuilder};
+use response::{
+    ChatCompletionsResponse, converse_stream_output_to_chat_completions_response_builder,
+};
 use uuid::Uuid;
 
 use crate::ProcessChatCompletionsRequest;
@@ -60,7 +62,7 @@ impl ChatCompletionsProvider for BedrockChatCompletionsProvider {
             loop {
                 match stream.recv().await {
                     Ok(Some(output)) => {
-                        let builder: ChatCompletionsResponseBuilder = output.into();
+                        let builder = converse_stream_output_to_chat_completions_response_builder(&output);
                         let response = builder
                             .id(Some(id.clone()))
                             .created(Some(created))

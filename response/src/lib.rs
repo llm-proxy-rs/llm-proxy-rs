@@ -165,63 +165,66 @@ impl UsageBuilder {
     }
 }
 
-impl From<ConverseStreamOutput> for ChatCompletionsResponseBuilder {
-    fn from(output: ConverseStreamOutput) -> Self {
-        let mut builder = ChatCompletionsResponse::builder();
+pub fn converse_stream_output_to_chat_completions_response_builder(
+    output: &ConverseStreamOutput,
+) -> ChatCompletionsResponseBuilder {
+    let mut builder = ChatCompletionsResponse::builder();
 
-        match output {
-            ConverseStreamOutput::ContentBlockDelta(event) => {
-                let delta = event
-                    .delta
-                    .and_then(|d| match d {
-                        ContentBlockDelta::Text(text) => Some(text),
-                        _ => None,
-                    })
-                    .map(|content| Delta::Content { content });
-
-                let choice = ChoiceBuilder::default()
-                    .delta(delta)
-                    .index(event.content_block_index)
-                    .build();
-
-                builder = builder.choice(choice);
-            }
-            ConverseStreamOutput::MessageStart(event) => {
-                let choice = ChoiceBuilder::default()
-                    .delta(match event.role {
-                        ConversationRole::Assistant => Some(Delta::Role {
-                            role: "assistant".to_string(),
-                        }),
-                        _ => None,
-                    })
-                    .build();
-
-                builder = builder.choice(choice);
-            }
-            ConverseStreamOutput::MessageStop(event) => {
-                let choice = ChoiceBuilder::default()
-                    .finish_reason(match event.stop_reason {
-                        StopReason::EndTurn => Some("stop".to_string()),
-                        _ => None,
-                    })
-                    .build();
-
-                builder = builder.choice(choice);
-            }
-            ConverseStreamOutput::Metadata(event) => {
-                let usage = event.usage.map(|u| {
-                    UsageBuilder::default()
-                        .completion_tokens(u.output_tokens)
-                        .prompt_tokens(u.input_tokens)
-                        .total_tokens(u.total_tokens)
-                        .build()
+    match output {
+        ConverseStreamOutput::ContentBlockDelta(event) => {
+            let delta = event
+                .delta
+                .as_ref()
+                .and_then(|d| match d {
+                    ContentBlockDelta::Text(text) => Some(text.clone()),
+                    _ => None,
+                })
+                .map(|content| Delta::Content {
+                    content: content.clone(),
                 });
 
-                builder = builder.usage(usage);
-            }
-            _ => {}
-        }
+            let choice = ChoiceBuilder::default()
+                .delta(delta)
+                .index(event.content_block_index)
+                .build();
 
-        builder
+            builder = builder.choice(choice);
+        }
+        ConverseStreamOutput::MessageStart(event) => {
+            let choice = ChoiceBuilder::default()
+                .delta(match event.role {
+                    ConversationRole::Assistant => Some(Delta::Role {
+                        role: "assistant".to_string(),
+                    }),
+                    _ => None,
+                })
+                .build();
+
+            builder = builder.choice(choice);
+        }
+        ConverseStreamOutput::MessageStop(event) => {
+            let choice = ChoiceBuilder::default()
+                .finish_reason(match event.stop_reason {
+                    StopReason::EndTurn => Some("stop".to_string()),
+                    _ => None,
+                })
+                .build();
+
+            builder = builder.choice(choice);
+        }
+        ConverseStreamOutput::Metadata(event) => {
+            let usage = event.usage.as_ref().map(|u| {
+                UsageBuilder::default()
+                    .completion_tokens(u.output_tokens)
+                    .prompt_tokens(u.input_tokens)
+                    .total_tokens(u.total_tokens)
+                    .build()
+            });
+
+            builder = builder.usage(usage);
+        }
+        _ => {}
     }
+
+    builder
 }
