@@ -1,7 +1,7 @@
 use aws_sdk_bedrockruntime::types::{ContentBlock, SystemContentBlock};
 use request::{Content, Contents};
 
-pub fn contents_to_bedrock_content_block(contents: &Contents) -> Vec<ContentBlock> {
+pub fn request_contents_to_bedrock_content_block(contents: &Contents) -> Vec<ContentBlock> {
     match contents {
         Contents::Array(arr) => arr
             .iter()
@@ -13,7 +13,9 @@ pub fn contents_to_bedrock_content_block(contents: &Contents) -> Vec<ContentBloc
     }
 }
 
-pub fn contents_to_bedrock_system_content_block(contents: &Contents) -> Vec<SystemContentBlock> {
+pub fn request_contents_to_bedrock_system_content_block(
+    contents: &Contents,
+) -> Vec<SystemContentBlock> {
     match contents {
         Contents::Array(arr) => arr
             .iter()

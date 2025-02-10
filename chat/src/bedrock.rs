@@ -1,6 +1,6 @@
 use aws_sdk_bedrockruntime::types::{Message, SystemContentBlock};
 use bedrock::{
-    content_blocks::contents_to_bedrock_system_content_block,
+    content_blocks::request_contents_to_bedrock_system_content_block,
     message::request_message_to_bedrock_message,
 };
 use request::{ChatCompletionsRequest, Role};
@@ -27,7 +27,7 @@ impl ProcessChatCompletionsRequest<BedrockChatCompletion> for ChatCompletionsReq
                     }
                 }
                 Role::System => {
-                    system_content_blocks.extend(contents_to_bedrock_system_content_block(
+                    system_content_blocks.extend(request_contents_to_bedrock_system_content_block(
                         &request_message.contents,
                     ));
                 }
