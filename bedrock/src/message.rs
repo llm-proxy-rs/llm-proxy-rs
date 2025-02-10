@@ -1,22 +1,20 @@
 use aws_sdk_bedrockruntime::types::{ConversationRole, Message as BedrockMessage};
 use request::{Message as RequestMessage, Role};
 
-use crate::content_blocks::ToBedrockContentBlocks;
+use crate::content_blocks::contents_to_bedrock_content_block;
 
-pub trait ToBedrockMessage {
-    fn to_bedrock_message(&self) -> Option<BedrockMessage>;
-}
-
-impl ToBedrockMessage for RequestMessage {
-    fn to_bedrock_message(&self) -> Option<BedrockMessage> {
-        BedrockMessage::builder()
-            .set_role(match self.role {
-                Role::Assistant => Some(ConversationRole::Assistant),
-                Role::User => Some(ConversationRole::User),
-                _ => None,
-            })
-            .set_content(Some(self.contents.to_bedrock_content_blocks()))
-            .build()
-            .ok()
-    }
+pub fn request_message_to_bedrock_message(
+    request_message: &RequestMessage,
+) -> Option<BedrockMessage> {
+    BedrockMessage::builder()
+        .set_role(match request_message.role {
+            Role::Assistant => Some(ConversationRole::Assistant),
+            Role::User => Some(ConversationRole::User),
+            _ => None,
+        })
+        .set_content(Some(contents_to_bedrock_content_block(
+            &request_message.contents,
+        )))
+        .build()
+        .ok()
 }
