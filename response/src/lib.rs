@@ -6,7 +6,7 @@ use serde::Serialize;
 #[derive(Debug, Serialize)]
 pub struct ChatCompletionsResponse {
     pub choices: Vec<Choice>,
-    pub created: Option<u64>,
+    pub created: Option<i64>,
     pub id: Option<String>,
     pub model: Option<String>,
     pub object: Option<String>,
@@ -44,7 +44,7 @@ impl ChatCompletionsResponse {
 #[derive(Default)]
 pub struct ChatCompletionsResponseBuilder {
     choices: Vec<Choice>,
-    created: Option<u64>,
+    created: Option<i64>,
     id: Option<String>,
     model: Option<String>,
     object: Option<String>,
@@ -57,7 +57,7 @@ impl ChatCompletionsResponseBuilder {
         self
     }
 
-    pub fn created(mut self, created: Option<u64>) -> Self {
+    pub fn created(mut self, created: Option<i64>) -> Self {
         self.created = created;
         self
     }
