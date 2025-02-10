@@ -2,5 +2,5 @@
 
 members = [
     "bedrock", "chat",
-    "request", "response",
+    "request", "response", "server",
 ]

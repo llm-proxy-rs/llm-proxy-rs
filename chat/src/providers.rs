@@ -13,6 +13,8 @@ use uuid::Uuid;
 use crate::ProcessChatCompletionsRequest;
 use crate::error::StreamError;
 
+const DONE_MESSAGE: &str = "[DONE]";
+
 #[async_trait]
 pub trait ChatCompletionsProvider {
     async fn chat_completions_stream(
@@ -79,7 +81,7 @@ impl ChatCompletionsProvider for BedrockChatCompletionsProvider {
                 }
             }
 
-            yield Ok(Event::default().data("[DONE]"));
+            yield Ok(Event::default().data(DONE_MESSAGE));
         };
 
         Ok(Sse::new(stream))
