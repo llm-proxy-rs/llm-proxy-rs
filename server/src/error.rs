@@ -4,11 +4,14 @@ pub struct AppError(anyhow::Error);
 
 impl IntoResponse for AppError {
     fn into_response(self) -> axum::response::Response {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Something went wrong: {}", self.0),
-        )
-            .into_response()
+        // Determine the appropriate status code based on the error
+        let status_code = if self.0.to_string().contains("Streaming is required") {
+            StatusCode::BAD_REQUEST
+        } else {
+            StatusCode::INTERNAL_SERVER_ERROR
+        };
+
+        (status_code, format!("Error: {}", self.0)).into_response()
     }
 }
 
