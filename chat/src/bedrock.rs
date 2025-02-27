@@ -11,7 +11,7 @@ pub struct BedrockChatCompletion {
     pub messages: Vec<Message>,
 }
 
-pub fn process_request_to_bedrock_completion(
+pub fn process_chat_completions_request_to_bedrock_chat_completion(
     request: &ChatCompletionsRequest,
 ) -> BedrockChatCompletion {
     let mut system_content_blocks = Vec::new();

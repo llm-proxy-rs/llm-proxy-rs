@@ -12,7 +12,9 @@ use tracing::{debug, error, info, trace};
 use uuid::Uuid;
 
 use crate::ProcessChatCompletionsRequest;
-use crate::bedrock::{BedrockChatCompletion, process_request_to_bedrock_completion};
+use crate::bedrock::{
+    BedrockChatCompletion, process_chat_completions_request_to_bedrock_chat_completion,
+};
 use crate::error::StreamError;
 
 const DONE_MESSAGE: &str = "[DONE]";
@@ -38,7 +40,7 @@ impl ProcessChatCompletionsRequest<BedrockChatCompletion> for BedrockChatComplet
         &self,
         request: &ChatCompletionsRequest,
     ) -> BedrockChatCompletion {
-        process_request_to_bedrock_completion(request)
+        process_chat_completions_request_to_bedrock_chat_completion(request)
     }
 }
 
