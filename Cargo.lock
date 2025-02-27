@@ -595,6 +595,7 @@ dependencies = [
  "request",
  "response",
  "serde_json",
+ "tracing",
  "uuid",
 ]
 
@@ -1852,6 +1853,7 @@ dependencies = [
  "futures",
  "request",
  "tokio",
+ "tracing",
  "tracing-subscriber",
 ]
 
