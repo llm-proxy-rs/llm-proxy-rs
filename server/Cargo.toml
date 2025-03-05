@@ -8,7 +8,6 @@ anyhow = "1.0.95"
 axum = "0.8.1"
 chat = { path = "../chat" }
 config = "0.15.7"
-futures = "0.3.31"
 request = { path = "../request" }
 tokio = { version = "1.43.0", features = ["full"] }
 tracing = "0.1.41"

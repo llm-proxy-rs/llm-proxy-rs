@@ -15,7 +15,6 @@ use crate::ProcessChatCompletionsRequest;
 use crate::bedrock::{
     BedrockChatCompletion, process_chat_completions_request_to_bedrock_chat_completion,
 };
-use crate::error::StreamError;
 
 const DONE_MESSAGE: &str = "[DONE]";
 
@@ -24,7 +23,7 @@ pub trait ChatCompletionsProvider {
     async fn chat_completions_stream(
         self,
         request: ChatCompletionsRequest,
-    ) -> anyhow::Result<Sse<impl Stream<Item = Result<Event, StreamError>>>>;
+    ) -> anyhow::Result<Sse<impl Stream<Item = anyhow::Result<Event>>>>;
 }
 
 pub struct BedrockChatCompletionsProvider {}
@@ -44,10 +43,10 @@ impl ProcessChatCompletionsRequest<BedrockChatCompletion> for BedrockChatComplet
     }
 }
 
-fn create_sse_event(response: &ChatCompletionsResponse) -> Result<Event, StreamError> {
+fn create_sse_event(response: &ChatCompletionsResponse) -> anyhow::Result<Event> {
     match serde_json::to_string(response) {
         Ok(data) => Ok(Event::default().data(data)),
-        Err(e) => Err(StreamError(format!("Failed to serialize response: {}", e))),
+        Err(e) => Err(anyhow::anyhow!("Failed to serialize response: {}", e)),
     }
 }
 
@@ -56,7 +55,7 @@ impl ChatCompletionsProvider for BedrockChatCompletionsProvider {
     async fn chat_completions_stream(
         self,
         request: ChatCompletionsRequest,
-    ) -> anyhow::Result<Sse<impl Stream<Item = Result<Event, StreamError>>>> {
+    ) -> anyhow::Result<Sse<impl Stream<Item = anyhow::Result<Event>>>> {
         debug!(
             "Processing chat completions request for model: {}",
             request.model
@@ -118,7 +117,10 @@ impl ChatCompletionsProvider for BedrockChatCompletionsProvider {
                     }
                     Err(e) => {
                         error!("Error receiving from stream: {}", e);
-                        yield Err(StreamError(format!("Stream receive error: {}", e)));
+                        yield Err(anyhow::anyhow!(
+                            "Stream receive error: {}",
+                            e
+                        ));
                     }
                 }
             }

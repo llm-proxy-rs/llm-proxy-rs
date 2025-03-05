@@ -1,14 +1,6 @@
-use axum::{
-    Json, Router,
-    response::sse::{Event, Sse},
-    routing::post,
-};
-use chat::{
-    error::StreamError,
-    providers::{BedrockChatCompletionsProvider, ChatCompletionsProvider},
-};
+use axum::{Json, Router, http::StatusCode, response::IntoResponse, routing::post};
+use chat::providers::{BedrockChatCompletionsProvider, ChatCompletionsProvider};
 use config::{Config, File};
-use futures::stream::Stream;
 use request::ChatCompletionsRequest;
 use tracing::{debug, error, info};
 
@@ -18,7 +10,7 @@ use crate::error::AppError;
 
 async fn chat_completions(
     Json(payload): Json<ChatCompletionsRequest>,
-) -> Result<Sse<impl Stream<Item = Result<Event, StreamError>>>, AppError> {
+) -> Result<impl IntoResponse, AppError> {
     debug!(
         "Received chat completions request for model: {}",
         payload.model
@@ -36,7 +28,9 @@ async fn chat_completions(
         "Processing chat completions request with {} messages",
         payload.messages.len()
     );
-    Ok(provider.chat_completions_stream(payload).await?)
+
+    let stream = provider.chat_completions_stream(payload).await?;
+    Ok((StatusCode::OK, stream))
 }
 
 async fn load_config() -> anyhow::Result<(String, u16)> {

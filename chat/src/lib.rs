@@ -1,5 +1,4 @@
 mod bedrock;
-pub mod error;
 pub mod providers;
 
 pub trait ProcessChatCompletionsRequest<T> {
