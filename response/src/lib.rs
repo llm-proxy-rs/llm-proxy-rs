@@ -2,6 +2,7 @@ use aws_sdk_bedrockruntime::types::{
     ContentBlockDelta, ConversationRole, ConverseStreamOutput, StopReason,
 };
 use serde::Serialize;
+use std::sync::Arc;
 
 #[derive(Debug, Serialize)]
 pub struct ChatCompletionsResponse {
@@ -167,6 +168,7 @@ impl UsageBuilder {
 
 pub fn converse_stream_output_to_chat_completions_response_builder(
     output: &ConverseStreamOutput,
+    usage_callback: Arc<dyn Fn(&Usage)>,
 ) -> ChatCompletionsResponseBuilder {
     let mut builder = ChatCompletionsResponse::builder();
 
@@ -214,11 +216,15 @@ pub fn converse_stream_output_to_chat_completions_response_builder(
         }
         ConverseStreamOutput::Metadata(event) => {
             let usage = event.usage.as_ref().map(|u| {
-                UsageBuilder::default()
+                let usage = UsageBuilder::default()
                     .completion_tokens(u.output_tokens)
                     .prompt_tokens(u.input_tokens)
                     .total_tokens(u.total_tokens)
-                    .build()
+                    .build();
+
+                usage_callback(&usage);
+
+                usage
             });
 
             builder = builder.usage(usage);
