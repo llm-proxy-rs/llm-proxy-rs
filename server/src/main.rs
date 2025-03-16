@@ -29,7 +29,14 @@ async fn chat_completions(
         payload.messages.len()
     );
 
-    let stream = provider.chat_completions_stream(payload).await?;
+    let stream = provider
+        .chat_completions_stream(payload, |usage| {
+            info!(
+                "Usage: prompt_tokens: {}, completion_tokens: {}, total_tokens: {}",
+                usage.prompt_tokens, usage.completion_tokens, usage.total_tokens
+            );
+        })
+        .await?;
     Ok((StatusCode::OK, stream))
 }
 

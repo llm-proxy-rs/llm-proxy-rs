@@ -6,8 +6,9 @@ use chrono::offset::Utc;
 use futures::stream::Stream;
 use request::ChatCompletionsRequest;
 use response::{
-    ChatCompletionsResponse, converse_stream_output_to_chat_completions_response_builder,
+    ChatCompletionsResponse, Usage, converse_stream_output_to_chat_completions_response_builder,
 };
+use std::sync::Arc;
 use tracing::{debug, error, info, trace};
 use uuid::Uuid;
 
@@ -20,10 +21,13 @@ const DONE_MESSAGE: &str = "[DONE]";
 
 #[async_trait]
 pub trait ChatCompletionsProvider {
-    async fn chat_completions_stream(
+    async fn chat_completions_stream<F>(
         self,
         request: ChatCompletionsRequest,
-    ) -> anyhow::Result<Sse<impl Stream<Item = anyhow::Result<Event>>>>;
+        usage_callback: F,
+    ) -> anyhow::Result<Sse<impl Stream<Item = anyhow::Result<Event>>>>
+    where
+        F: Fn(&Usage) + Send + Sync + 'static;
 }
 
 pub struct BedrockChatCompletionsProvider {}
@@ -52,10 +56,14 @@ fn create_sse_event(response: &ChatCompletionsResponse) -> anyhow::Result<Event>
 
 #[async_trait]
 impl ChatCompletionsProvider for BedrockChatCompletionsProvider {
-    async fn chat_completions_stream(
+    async fn chat_completions_stream<F>(
         self,
         request: ChatCompletionsRequest,
-    ) -> anyhow::Result<Sse<impl Stream<Item = anyhow::Result<Event>>>> {
+        usage_callback: F,
+    ) -> anyhow::Result<Sse<impl Stream<Item = anyhow::Result<Event>>>>
+    where
+        F: Fn(&Usage) + Send + Sync + 'static,
+    {
         debug!(
             "Processing chat completions request for model: {}",
             request.model
@@ -88,13 +96,16 @@ impl ChatCompletionsProvider for BedrockChatCompletionsProvider {
         let created = Utc::now().timestamp();
         debug!("Created response with id: {}", id);
 
+        let usage_callback = Arc::new(usage_callback);
+
         let stream = async_stream::stream! {
             trace!("Starting to process stream");
             loop {
                 match stream.recv().await {
                     Ok(Some(output)) => {
                         trace!("Received output from Bedrock stream");
-                        let builder = converse_stream_output_to_chat_completions_response_builder(&output);
+                        let usage_callback = usage_callback.clone();
+                        let builder = converse_stream_output_to_chat_completions_response_builder(&output, usage_callback);
                         let response = builder
                             .id(Some(id.clone()))
                             .created(Some(created))
