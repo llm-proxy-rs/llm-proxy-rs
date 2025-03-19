@@ -1,9 +1,9 @@
 use async_trait::async_trait;
 use aws_config::BehaviorVersion;
 use aws_sdk_bedrockruntime::Client;
-use axum::response::sse::{Event, Sse};
+use axum::response::sse::Event;
 use chrono::offset::Utc;
-use futures::stream::Stream;
+use futures::stream::{BoxStream, StreamExt};
 use request::ChatCompletionsRequest;
 use response::{
     ChatCompletionsResponse, Usage, converse_stream_output_to_chat_completions_response_builder,
@@ -25,7 +25,7 @@ pub trait ChatCompletionsProvider {
         self,
         request: ChatCompletionsRequest,
         usage_callback: F,
-    ) -> anyhow::Result<Sse<impl Stream<Item = anyhow::Result<Event>>>>
+    ) -> anyhow::Result<BoxStream<'async_trait, anyhow::Result<Event>>>
     where
         F: Fn(&Usage) + Send + Sync + 'static;
 }
@@ -60,7 +60,7 @@ impl ChatCompletionsProvider for BedrockChatCompletionsProvider {
         self,
         request: ChatCompletionsRequest,
         usage_callback: F,
-    ) -> anyhow::Result<Sse<impl Stream<Item = anyhow::Result<Event>>>>
+    ) -> anyhow::Result<BoxStream<'async_trait, anyhow::Result<Event>>>
     where
         F: Fn(&Usage) + Send + Sync + 'static,
     {
@@ -140,6 +140,6 @@ impl ChatCompletionsProvider for BedrockChatCompletionsProvider {
             yield Ok(Event::default().data(DONE_MESSAGE));
         };
 
-        Ok(Sse::new(stream))
+        Ok(stream.boxed())
     }
 }

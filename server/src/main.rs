@@ -1,4 +1,9 @@
-use axum::{Json, Router, http::StatusCode, response::IntoResponse, routing::post};
+use axum::{
+    Json, Router,
+    http::StatusCode,
+    response::{IntoResponse, sse::Sse},
+    routing::post,
+};
 use chat::providers::{BedrockChatCompletionsProvider, ChatCompletionsProvider};
 use config::{Config, File};
 use request::ChatCompletionsRequest;
@@ -37,7 +42,7 @@ async fn chat_completions(
             );
         })
         .await?;
-    Ok((StatusCode::OK, stream))
+    Ok((StatusCode::OK, Sse::new(stream)))
 }
 
 async fn load_config() -> anyhow::Result<(String, u16)> {
