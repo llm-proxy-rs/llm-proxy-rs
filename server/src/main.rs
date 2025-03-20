@@ -53,8 +53,7 @@ async fn chat_completions(
 
         info!("Using OpenAI provider for model: {}", payload.model);
 
-        let provider = OpenAICompletionsProvider::new(state.openai_api_key.unwrap());
-        provider
+        OpenAICompletionsProvider::new(state.openai_api_key.unwrap_or_default())
             .chat_completions_stream(payload, |usage| {
                 info!(
                     "Usage: prompt_tokens: {}, completion_tokens: {}, total_tokens: {}",
@@ -64,8 +63,8 @@ async fn chat_completions(
             .await?
     } else {
         info!("Using Bedrock provider for model: {}", payload.model);
-        let provider = BedrockChatCompletionsProvider::new().await;
-        provider
+        BedrockChatCompletionsProvider::new()
+            .await
             .chat_completions_stream(payload, |usage| {
                 info!(
                     "Usage: prompt_tokens: {}, completion_tokens: {}, total_tokens: {}",
