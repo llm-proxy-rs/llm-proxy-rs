@@ -14,6 +14,6 @@ pub trait ProcessChatCompletionsRequest<T> {
 fn create_sse_event(response: &ChatCompletionsResponse) -> anyhow::Result<Event> {
     match serde_json::to_string(response) {
         Ok(data) => Ok(Event::default().data(data)),
-        Err(e) => Err(anyhow::anyhow!("Failed to serialize response: {}", e)),
+        Err(e) => anyhow::bail!("Failed to serialize response: {}", e),
     }
 }
