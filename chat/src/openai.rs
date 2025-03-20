@@ -8,6 +8,7 @@ use request::ChatCompletionsRequest;
 use reqwest;
 use reqwest_streams::JsonStreamResponse as _;
 use response::{ChatCompletionsResponse, Usage};
+use tracing::{debug, error, info};
 
 pub const OPENAI_API_CHAT_COMPLETIONS_URL: &str = "https://api.openai.com/v1/chat/completions";
 
@@ -31,6 +32,8 @@ impl ChatCompletionsProvider for OpenAICompletionsProvider {
     where
         F: Fn(&Usage) + Send + Sync + 'static,
     {
+        debug!("Starting OpenAI chat completion request with model: {}", request.model);
+        
         let client = reqwest::Client::new();
         let response = client
             .post(OPENAI_API_CHAT_COMPLETIONS_URL)
@@ -41,8 +44,11 @@ impl ChatCompletionsProvider for OpenAICompletionsProvider {
             .await?;
 
         let status = response.status();
+        debug!("OpenAI API response status: {}", status);
+        
         if !status.is_success() {
             let error_text = response.text().await?;
+            error!("OpenAI API error: {} - {}", status, error_text);
             return Err(anyhow::anyhow!(
                 "OpenAI API error: {} - {}",
                 status,
@@ -50,6 +56,8 @@ impl ChatCompletionsProvider for OpenAICompletionsProvider {
             ));
         }
 
+        info!("Successfully connected to OpenAI API, starting stream processing");
+        
         let stream = stream! {
             let mut stream = response
                 .json_array_stream::<ChatCompletionsResponse>(1024 * 1024);
@@ -59,21 +67,28 @@ impl ChatCompletionsProvider for OpenAICompletionsProvider {
                     Ok(response) => {
                         // Call usage callback if usage data is available
                         if let Some(usage) = &response.usage {
+                            debug!("Received usage data: prompt_tokens={}, completion_tokens={}, total_tokens={}", 
+                                  usage.prompt_tokens, usage.completion_tokens, usage.total_tokens);
                             usage_callback(usage);
                         }
 
                         // Create SSE event from response
                         match create_sse_event(&response) {
                             Ok(event) => yield Ok(event),
-                            Err(e) => yield Err(e),
+                            Err(e) => {
+                                error!("Failed to create SSE event: {}", e);
+                                yield Err(e);
+                            }
                         }
                     }
                     Err(e) => {
+                        error!("Failed to parse OpenAI response: {}", e);
                         let error = anyhow::anyhow!("Failed to parse response: {}", e);
                         yield Err(error);
                     }
                 }
             }
+            info!("OpenAI stream completed, sending DONE message");
             yield Ok(Event::default().data(DONE_MESSAGE));
         };
 
