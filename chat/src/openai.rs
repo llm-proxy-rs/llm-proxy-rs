@@ -52,11 +52,11 @@ impl ChatCompletionsProvider for OpenAIChatCompletionsProvider {
         if !status.is_success() {
             let error_text = response.text().await?;
             error!("OpenAI API error: {} - {}", status, error_text);
-            return Err(anyhow::anyhow!(
+            anyhow::bail!(
                 "OpenAI API error: {} - {}",
                 status,
                 error_text
-            ));
+            );
         }
 
         info!("Successfully connected to OpenAI API, starting stream processing");
