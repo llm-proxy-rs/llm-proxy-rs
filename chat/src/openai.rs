@@ -12,18 +12,18 @@ use tracing::{debug, error, info};
 
 pub const OPENAI_API_CHAT_COMPLETIONS_URL: &str = "https://api.openai.com/v1/chat/completions";
 
-pub struct OpenAICompletionsProvider {
+pub struct OpenAIChatCompletionsProvider {
     openai_api_key: String,
 }
 
-impl OpenAICompletionsProvider {
+impl OpenAIChatCompletionsProvider {
     pub fn new(openai_api_key: String) -> Self {
         Self { openai_api_key }
     }
 }
 
 #[async_trait]
-impl ChatCompletionsProvider for OpenAICompletionsProvider {
+impl ChatCompletionsProvider for OpenAIChatCompletionsProvider {
     async fn chat_completions_stream<F>(
         self,
         request: ChatCompletionsRequest,

@@ -5,8 +5,10 @@ use axum::{
     response::{IntoResponse, sse::Sse},
     routing::post,
 };
-use chat::openai::OpenAICompletionsProvider;
-use chat::providers::{BedrockChatCompletionsProvider, ChatCompletionsProvider};
+use chat::{
+    openai::OpenAIChatCompletionsProvider,
+    providers::{BedrockChatCompletionsProvider, ChatCompletionsProvider},
+};
 use config::{Config, File};
 use request::{ChatCompletionsRequest, StreamOptions};
 use tracing::{debug, error, info};
@@ -51,7 +53,7 @@ async fn chat_completions(
                     "OpenAI API key is empty but OpenAI model was requested"
                 )));
             }
-            OpenAICompletionsProvider::new(openai_api_key)
+            OpenAIChatCompletionsProvider::new(openai_api_key)
                 .chat_completions_stream(payload, |usage| {
                     info!(
                         "Usage: prompt_tokens: {}, completion_tokens: {}, total_tokens: {}",
