@@ -44,23 +44,28 @@ async fn chat_completions(
     });
 
     let stream = if model_name.starts_with("gpt-") {
-        if state.openai_api_key.is_none() {
+        info!("Using OpenAI provider for model: {}", payload.model);
+        if let Some(openai_api_key) = state.openai_api_key {
+            if openai_api_key.is_empty() {
+                error!("OpenAI API key is empty but OpenAI model was requested");
+                return Err(AppError::from(anyhow::anyhow!(
+                    "OpenAI API key is empty but OpenAI model was requested"
+                )));
+            }
+            OpenAICompletionsProvider::new(openai_api_key)
+                .chat_completions_stream(payload, |usage| {
+                    info!(
+                        "Usage: prompt_tokens: {}, completion_tokens: {}, total_tokens: {}",
+                        usage.prompt_tokens, usage.completion_tokens, usage.total_tokens
+                    );
+                })
+                .await?
+        } else {
             error!("OpenAI API key is not configured but OpenAI model was requested");
             return Err(AppError::from(anyhow::anyhow!(
                 "OpenAI API key is not configured but OpenAI model was requested"
             )));
         }
-
-        info!("Using OpenAI provider for model: {}", payload.model);
-
-        OpenAICompletionsProvider::new(state.openai_api_key.unwrap_or_default())
-            .chat_completions_stream(payload, |usage| {
-                info!(
-                    "Usage: prompt_tokens: {}, completion_tokens: {}, total_tokens: {}",
-                    usage.prompt_tokens, usage.completion_tokens, usage.total_tokens
-                );
-            })
-            .await?
     } else {
         info!("Using Bedrock provider for model: {}", payload.model);
         BedrockChatCompletionsProvider::new()
