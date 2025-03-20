@@ -60,7 +60,7 @@ impl ChatCompletionsProvider for OpenAICompletionsProvider {
                     match item {
                         Ok(chunk) => {
                             debug!("Received chunk from OpenAI stream");
-                            // For streaming responses, usage is usually only in the last chunk
+
                             if let Some(ref usage) = chunk.usage {
                                 info!("Received usage information from OpenAI");
                                 usage_callback(usage);

@@ -1,3 +1,9 @@
+use crate::{
+    ::bedrock::{
+        BedrockChatCompletion, process_chat_completions_request_to_bedrock_chat_completion,
+    },
+    DONE_MESSAGE, ProcessChatCompletionsRequest, create_sse_event,
+};
 use async_trait::async_trait;
 use aws_config::BehaviorVersion;
 use aws_sdk_bedrockruntime::Client;
@@ -11,12 +17,6 @@ use response::{
 use std::sync::Arc;
 use tracing::{debug, error, info, trace};
 use uuid::Uuid;
-
-use crate::DONE_MESSAGE;
-use crate::ProcessChatCompletionsRequest;
-use crate::bedrock::{
-    BedrockChatCompletion, process_chat_completions_request_to_bedrock_chat_completion,
-};
 
 #[async_trait]
 pub trait ChatCompletionsProvider {
@@ -43,13 +43,6 @@ impl ProcessChatCompletionsRequest<BedrockChatCompletion> for BedrockChatComplet
         request: &ChatCompletionsRequest,
     ) -> BedrockChatCompletion {
         process_chat_completions_request_to_bedrock_chat_completion(request)
-    }
-}
-
-fn create_sse_event(response: &ChatCompletionsResponse) -> anyhow::Result<Event> {
-    match serde_json::to_string(response) {
-        Ok(data) => Ok(Event::default().data(data)),
-        Err(e) => Err(anyhow::anyhow!("Failed to serialize response: {}", e)),
     }
 }
 
