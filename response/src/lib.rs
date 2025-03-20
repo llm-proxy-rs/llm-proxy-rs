@@ -35,6 +35,22 @@ pub struct Choice {
 pub enum Delta {
     Content { content: String },
     Role { role: String },
+    ToolCalls { tool_calls: Vec<ToolCall> },
+    FunctionCall { function_call: FunctionCall },
+    Empty {},
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct ToolCall {
+    pub id: String,
+    pub r#type: String,
+    pub function: FunctionCall,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct FunctionCall {
+    pub name: String,
+    pub arguments: String,
 }
 
 #[derive(Debug, Default, Deserialize, Serialize)]
