@@ -110,7 +110,6 @@ async fn main() -> anyhow::Result<()> {
     let (host, port, openai_api_key) = load_config().await?;
     info!("Starting server on {}:{}", host, port);
 
-    // Create AppState with the OpenAI API key
     let state = AppState { openai_api_key };
 
     let app = Router::new()
