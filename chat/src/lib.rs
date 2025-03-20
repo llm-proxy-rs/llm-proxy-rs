@@ -2,6 +2,9 @@ pub mod bedrock;
 pub mod openai;
 pub mod providers;
 
+use axum::response::sse::Event;
+use response::ChatCompletionsResponse;
+
 pub const DONE_MESSAGE: &str = "[DONE]";
 
 pub trait ProcessChatCompletionsRequest<T> {

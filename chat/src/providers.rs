@@ -1,8 +1,7 @@
 use crate::{
-    ::bedrock::{
-        BedrockChatCompletion, process_chat_completions_request_to_bedrock_chat_completion,
-    },
-    DONE_MESSAGE, ProcessChatCompletionsRequest, create_sse_event,
+    DONE_MESSAGE, ProcessChatCompletionsRequest,
+    bedrock::{BedrockChatCompletion, process_chat_completions_request_to_bedrock_chat_completion},
+    create_sse_event,
 };
 use async_trait::async_trait;
 use aws_config::BehaviorVersion;
@@ -12,7 +11,7 @@ use chrono::offset::Utc;
 use futures::stream::{BoxStream, StreamExt};
 use request::ChatCompletionsRequest;
 use response::{
-    ChatCompletionsResponse, Usage, converse_stream_output_to_chat_completions_response_builder,
+    Usage, converse_stream_output_to_chat_completions_response_builder,
 };
 use std::sync::Arc;
 use tracing::{debug, error, info, trace};

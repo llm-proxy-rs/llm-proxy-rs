@@ -4,9 +4,11 @@ use axum::{
     response::{IntoResponse, sse::Sse},
     routing::post,
 };
+use chat::openai::OpenAICompletionsProvider;
 use chat::providers::{BedrockChatCompletionsProvider, ChatCompletionsProvider};
 use config::{Config, File};
 use request::ChatCompletionsRequest;
+use std::env;
 use tracing::{debug, error, info};
 
 mod error;
@@ -28,20 +30,36 @@ async fn chat_completions(
         )));
     }
 
-    let provider = BedrockChatCompletionsProvider::new().await;
-    info!(
-        "Processing chat completions request with {} messages",
-        payload.messages.len()
-    );
+    // Choose provider based on model name
+    let model_name = payload.model.to_lowercase();
 
-    let stream = provider
-        .chat_completions_stream(payload, |usage| {
-            info!(
-                "Usage: prompt_tokens: {}, completion_tokens: {}, total_tokens: {}",
-                usage.prompt_tokens, usage.completion_tokens, usage.total_tokens
-            );
-        })
-        .await?;
+    let stream = if model_name.starts_with("gpt-") {
+        info!("Using OpenAI provider for model: {}", payload.model);
+        let openai_api_key = env::var("OPENAI_API_KEY")
+            .map_err(|_| AppError::from(anyhow::anyhow!("OPENAI_API_KEY not set")))?;
+
+        let provider = OpenAICompletionsProvider::new(openai_api_key);
+        provider
+            .chat_completions_stream(payload, |usage| {
+                info!(
+                    "Usage: prompt_tokens: {}, completion_tokens: {}, total_tokens: {}",
+                    usage.prompt_tokens, usage.completion_tokens, usage.total_tokens
+                );
+            })
+            .await?
+    } else {
+        info!("Using Bedrock provider for model: {}", payload.model);
+        let provider = BedrockChatCompletionsProvider::new().await;
+        provider
+            .chat_completions_stream(payload, |usage| {
+                info!(
+                    "Usage: prompt_tokens: {}, completion_tokens: {}, total_tokens: {}",
+                    usage.prompt_tokens, usage.completion_tokens, usage.total_tokens
+                );
+            })
+            .await?
+    };
+
     Ok((StatusCode::OK, Sse::new(stream)))
 }
 

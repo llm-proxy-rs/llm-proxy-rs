@@ -1,5 +1,4 @@
 use crate::{DONE_MESSAGE, create_sse_event, providers::ChatCompletionsProvider};
-use anyhow::Result;
 use async_stream::stream;
 use async_trait::async_trait;
 use axum::response::sse::Event;
@@ -9,8 +8,6 @@ use request::ChatCompletionsRequest;
 use reqwest;
 use reqwest_streams::JsonStreamResponse as _;
 use response::{ChatCompletionsResponse, Usage};
-use std::sync::Arc;
-use tracing::{debug, info};
 
 pub const OPENAI_API_CHAT_COMPLETIONS_URL: &str = "https://api.openai.com/v1/chat/completions";
 
@@ -28,20 +25,13 @@ impl OpenAICompletionsProvider {
 impl ChatCompletionsProvider for OpenAICompletionsProvider {
     async fn chat_completions_stream<F>(
         self,
-        mut request: ChatCompletionsRequest,
+        request: ChatCompletionsRequest,
         usage_callback: F,
-    ) -> Result<BoxStream<'async_trait, anyhow::Result<Event>>>
+    ) -> anyhow::Result<BoxStream<'async_trait, anyhow::Result<Event>>>
     where
         F: Fn(&Usage) + Send + Sync + 'static,
     {
-        debug!("Creating OpenAI chat completions request");
         let client = reqwest::Client::new();
-
-        request.stream = Some(true);
-
-        let usage_callback = Arc::new(usage_callback);
-
-        info!("Sending request to OpenAI API");
         let response = client
             .post(OPENAI_API_CHAT_COMPLETIONS_URL)
             .header("Authorization", format!("Bearer {}", self.openai_api_key))
@@ -50,50 +40,43 @@ impl ChatCompletionsProvider for OpenAICompletionsProvider {
             .send()
             .await?;
 
-        if response.status().is_success() {
-            debug!("Successfully connected to OpenAI stream");
+        let status = response.status();
+        if !status.is_success() {
+            let error_text = response.text().await?;
+            return Err(anyhow::anyhow!(
+                "OpenAI API error: {} - {}",
+                status,
+                error_text
+            ));
+        }
 
-            let stream = stream! {
-                let mut json_stream = response.json_array_stream::<ChatCompletionsResponse>(1024 * 1024);
+        let stream = stream! {
+            let mut stream = response
+                .json_array_stream::<ChatCompletionsResponse>(1024 * 1024);
 
-                while let Some(item) = json_stream.next().await {
-                    match item {
-                        Ok(chunk) => {
-                            debug!("Received chunk from OpenAI stream");
-
-                            if let Some(ref usage) = chunk.usage {
-                                info!("Received usage information from OpenAI");
-                                usage_callback(usage);
-                            }
-
-                            match create_sse_event(&chunk) {
-                                Ok(event) => {
-                                    debug!("Created SSE event");
-                                    yield Ok(event);
-                                },
-                                Err(e) => {
-                                    info!("Error creating SSE event: {}", e);
-                                    yield Err(anyhow::anyhow!("Error creating SSE event: {}", e));
-                                }
-                            }
+            while let Some(item) = stream.next().await {
+                match item {
+                    Ok(response) => {
+                        // Call usage callback if usage data is available
+                        if let Some(usage) = &response.usage {
+                            usage_callback(usage);
                         }
-                        Err(e) => {
-                            info!("Error parsing stream chunk: {}", e);
-                            yield Err(anyhow::anyhow!("Error parsing stream: {}", e));
+
+                        // Create SSE event from response
+                        match create_sse_event(&response) {
+                            Ok(event) => yield Ok(event),
+                            Err(e) => yield Err(e),
                         }
                     }
+                    Err(e) => {
+                        let error = anyhow::anyhow!("Failed to parse response: {}", e);
+                        yield Err(error);
+                    }
                 }
+            }
+            yield Ok(Event::default().data(DONE_MESSAGE));
+        };
 
-                info!("Stream finished, sending DONE message");
-                yield Ok(Event::default().data(DONE_MESSAGE));
-            };
-
-            Ok(stream.boxed())
-        } else {
-            Err(anyhow::anyhow!(
-                "Failed to get chat completions: {}",
-                response.status()
-            ))
-        }
+        Ok(Box::pin(stream))
     }
 }
