@@ -30,7 +30,6 @@ async fn chat_completions(
         )));
     }
 
-    // Choose provider based on model name
     let model_name = payload.model.to_lowercase();
 
     let stream = if model_name.starts_with("gpt-") {
