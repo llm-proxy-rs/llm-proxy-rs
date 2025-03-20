@@ -10,7 +10,6 @@ use chat::providers::{BedrockChatCompletionsProvider, ChatCompletionsProvider};
 use config::{Config, File};
 use request::ChatCompletionsRequest;
 use tracing::{debug, error, info};
-use anyhow::Context;
 
 mod error;
 
@@ -19,7 +18,7 @@ use crate::error::AppError;
 // Define the AppState struct to hold configuration and API keys
 #[derive(Clone)]
 struct AppState {
-    openai_api_key: String,
+    openai_api_key: Option<String>,
 }
 
 async fn chat_completions(
@@ -42,6 +41,13 @@ async fn chat_completions(
     let model_name = payload.model.to_lowercase();
 
     let stream = if model_name.starts_with("gpt-") {
+        if state.openai_api_key.is_none() {
+            error!("OpenAI API key is not configured but OpenAI model was requested");
+            return Err(AppError::from(anyhow::anyhow!(
+                "OpenAI API key is not configured but OpenAI model was requested"
+            )));
+        }
+
         info!("Using OpenAI provider for model: {}", payload.model);
 
         // Ensure stream_options with include_usage is set for OpenAI requests
@@ -50,7 +56,7 @@ async fn chat_completions(
             include_usage: true,
         });
 
-        let provider = OpenAICompletionsProvider::new(state.openai_api_key.clone());
+        let provider = OpenAICompletionsProvider::new(state.openai_api_key.unwrap());
         provider
             .chat_completions_stream(openai_payload, |usage| {
                 info!(
@@ -75,7 +81,7 @@ async fn chat_completions(
     Ok((StatusCode::OK, Sse::new(stream)))
 }
 
-async fn load_config() -> anyhow::Result<(String, u16, String)> {
+async fn load_config() -> anyhow::Result<(String, u16, Option<String>)> {
     let settings = Config::builder()
         .add_source(File::with_name("config"))
         .build()?;
@@ -85,9 +91,13 @@ async fn load_config() -> anyhow::Result<(String, u16, String)> {
         .unwrap_or_else(|_| "127.0.0.1".to_string());
     let port: u16 = settings.get("port").unwrap_or(3000);
 
-    let openai_api_key = settings
-        .get::<String>("openai_api_key")
-        .context("Failed to retrieve openai_api_key from configuration")?;
+    let openai_api_key = settings.get::<String>("openai_api_key").ok();
+
+    if openai_api_key.is_some() {
+        info!("OpenAI API key found in configuration");
+    } else {
+        info!("No OpenAI API key found in configuration, OpenAI models will not be available");
+    }
 
     Ok((host, port, openai_api_key))
 }
