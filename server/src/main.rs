@@ -8,7 +8,7 @@ use axum::{
 use chat::openai::OpenAICompletionsProvider;
 use chat::providers::{BedrockChatCompletionsProvider, ChatCompletionsProvider};
 use config::{Config, File};
-use request::ChatCompletionsRequest;
+use request::{ChatCompletionsRequest, StreamOptions};
 use tracing::{debug, error, info};
 
 mod error;
@@ -23,7 +23,7 @@ struct AppState {
 
 async fn chat_completions(
     State(state): State<AppState>,
-    Json(payload): Json<ChatCompletionsRequest>,
+    Json(mut payload): Json<ChatCompletionsRequest>,
 ) -> Result<impl IntoResponse, AppError> {
     debug!(
         "Received chat completions request for model: {}",
@@ -37,8 +37,11 @@ async fn chat_completions(
         )));
     }
 
-    // Choose provider based on model name
     let model_name = payload.model.to_lowercase();
+
+    payload.stream_options = Some(StreamOptions {
+        include_usage: true,
+    });
 
     let stream = if model_name.starts_with("gpt-") {
         if state.openai_api_key.is_none() {
@@ -50,15 +53,9 @@ async fn chat_completions(
 
         info!("Using OpenAI provider for model: {}", payload.model);
 
-        // Ensure stream_options with include_usage is set for OpenAI requests
-        let mut openai_payload = payload;
-        openai_payload.stream_options = Some(request::StreamOptions {
-            include_usage: true,
-        });
-
         let provider = OpenAICompletionsProvider::new(state.openai_api_key.unwrap());
         provider
-            .chat_completions_stream(openai_payload, |usage| {
+            .chat_completions_stream(payload, |usage| {
                 info!(
                     "Usage: prompt_tokens: {}, completion_tokens: {}, total_tokens: {}",
                     usage.prompt_tokens, usage.completion_tokens, usage.total_tokens
