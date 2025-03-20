@@ -110,11 +110,11 @@ async fn main() -> anyhow::Result<()> {
     let (host, port, openai_api_key) = load_config().await?;
     info!("Starting server on {}:{}", host, port);
 
-    let state = AppState { openai_api_key };
+    let app_state = AppState { openai_api_key };
 
     let app = Router::new()
         .route("/chat/completions", post(chat_completions))
-        .with_state(state);
+        .with_state(app_state);
 
     info!("Routes configured, binding to {}:{}", host, port);
     let listener = tokio::net::TcpListener::bind(format!("{}:{}", host, port)).await?;
