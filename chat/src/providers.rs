@@ -12,12 +12,11 @@ use std::sync::Arc;
 use tracing::{debug, error, info, trace};
 use uuid::Uuid;
 
+use crate::DONE_MESSAGE;
 use crate::ProcessChatCompletionsRequest;
 use crate::bedrock::{
     BedrockChatCompletion, process_chat_completions_request_to_bedrock_chat_completion,
 };
-
-const DONE_MESSAGE: &str = "[DONE]";
 
 #[async_trait]
 pub trait ChatCompletionsProvider {

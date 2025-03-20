@@ -1,10 +1,10 @@
 use aws_sdk_bedrockruntime::types::{
     ContentBlockDelta, ConversationRole, ConverseStreamOutput, StopReason,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct ChatCompletionsResponse {
     pub choices: Vec<Choice>,
     pub created: Option<i64>,
@@ -14,7 +14,7 @@ pub struct ChatCompletionsResponse {
     pub usage: Option<Usage>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct Choice {
     pub delta: Option<Delta>,
     pub finish_reason: Option<String>,
@@ -22,14 +22,14 @@ pub struct Choice {
     pub logprobs: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(untagged)]
 pub enum Delta {
     Content { content: String },
     Role { role: String },
 }
 
-#[derive(Debug, Default, Serialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 pub struct Usage {
     pub completion_tokens: i32,
     pub prompt_tokens: i32,

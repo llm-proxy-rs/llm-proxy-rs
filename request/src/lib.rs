@@ -1,12 +1,12 @@
 use serde::{
-    Deserialize,
+    Deserialize, Serialize,
     de::{self, Deserializer, SeqAccess, Visitor},
 };
 use std::collections::HashMap;
 use std::{fmt, marker::PhantomData, str::FromStr};
 use void::Void;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct ChatCompletionsRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub frequency_penalty: Option<f32>,
@@ -16,7 +16,6 @@ pub struct ChatCompletionsRequest {
     pub messages: Vec<Message>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_tokens: Option<i32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub model: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub n: Option<i32>,
@@ -34,14 +33,14 @@ pub struct ChatCompletionsRequest {
     pub user: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct Message {
     #[serde(rename = "content", deserialize_with = "string_or_array")]
     pub contents: Contents,
     pub role: Role,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Role {
     Assistant,
@@ -49,14 +48,14 @@ pub enum Role {
     User,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(untagged)]
 pub enum Contents {
     Array(Vec<Content>),
     String(String),
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(tag = "type")]
 pub enum Content {
     #[serde(rename = "text")]
