@@ -15,7 +15,6 @@ mod error;
 
 use crate::error::AppError;
 
-// Define the AppState struct to hold configuration and API keys
 #[derive(Clone)]
 struct AppState {
     openai_api_key: Option<String>,
