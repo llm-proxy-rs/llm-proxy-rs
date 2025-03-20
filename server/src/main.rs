@@ -9,8 +9,8 @@ use chat::openai::OpenAICompletionsProvider;
 use chat::providers::{BedrockChatCompletionsProvider, ChatCompletionsProvider};
 use config::{Config, File};
 use request::ChatCompletionsRequest;
-use std::env;
 use tracing::{debug, error, info};
+use anyhow::Context;
 
 mod error;
 
@@ -85,9 +85,9 @@ async fn load_config() -> anyhow::Result<(String, u16, String)> {
         .unwrap_or_else(|_| "127.0.0.1".to_string());
     let port: u16 = settings.get("port").unwrap_or(3000);
 
-    // Load OpenAI API key from environment variable
-    let openai_api_key = env::var("OPENAI_API_KEY")
-        .map_err(|_| anyhow::anyhow!("OPENAI_API_KEY environment variable not set"))?;
+    let openai_api_key = settings
+        .get::<String>("openai_api_key")
+        .context("Failed to retrieve openai_api_key from configuration")?;
 
     Ok((host, port, openai_api_key))
 }
