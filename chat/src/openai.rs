@@ -68,14 +68,12 @@ impl ChatCompletionsProvider for OpenAICompletionsProvider {
             while let Some(item) = stream.next().await {
                 match item {
                     Ok(response) => {
-                        // Call usage callback if usage data is available
                         if let Some(usage) = &response.usage {
                             debug!("Received usage data: prompt_tokens={}, completion_tokens={}, total_tokens={}",
                                   usage.prompt_tokens, usage.completion_tokens, usage.total_tokens);
                             usage_callback(usage);
                         }
 
-                        // Create SSE event from response
                         match create_sse_event(&response) {
                             Ok(event) => yield Ok(event),
                             Err(e) => {
