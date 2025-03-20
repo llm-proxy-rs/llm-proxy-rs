@@ -10,9 +10,7 @@ use axum::response::sse::Event;
 use chrono::offset::Utc;
 use futures::stream::{BoxStream, StreamExt};
 use request::ChatCompletionsRequest;
-use response::{
-    Usage, converse_stream_output_to_chat_completions_response_builder,
-};
+use response::{Usage, converse_stream_output_to_chat_completions_response_builder};
 use std::sync::Arc;
 use tracing::{debug, error, info, trace};
 use uuid::Uuid;

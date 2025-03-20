@@ -32,8 +32,11 @@ impl ChatCompletionsProvider for OpenAICompletionsProvider {
     where
         F: Fn(&Usage) + Send + Sync + 'static,
     {
-        debug!("Starting OpenAI chat completion request with model: {}", request.model);
-        
+        debug!(
+            "Starting OpenAI chat completion request with model: {}",
+            request.model
+        );
+
         let client = reqwest::Client::new();
         let response = client
             .post(OPENAI_API_CHAT_COMPLETIONS_URL)
@@ -45,7 +48,7 @@ impl ChatCompletionsProvider for OpenAICompletionsProvider {
 
         let status = response.status();
         debug!("OpenAI API response status: {}", status);
-        
+
         if !status.is_success() {
             let error_text = response.text().await?;
             error!("OpenAI API error: {} - {}", status, error_text);
@@ -57,7 +60,7 @@ impl ChatCompletionsProvider for OpenAICompletionsProvider {
         }
 
         info!("Successfully connected to OpenAI API, starting stream processing");
-        
+
         let stream = stream! {
             let mut stream = response
                 .json_array_stream::<ChatCompletionsResponse>(1024 * 1024);
@@ -67,7 +70,7 @@ impl ChatCompletionsProvider for OpenAICompletionsProvider {
                     Ok(response) => {
                         // Call usage callback if usage data is available
                         if let Some(usage) = &response.usage {
-                            debug!("Received usage data: prompt_tokens={}, completion_tokens={}, total_tokens={}", 
+                            debug!("Received usage data: prompt_tokens={}, completion_tokens={}, total_tokens={}",
                                   usage.prompt_tokens, usage.completion_tokens, usage.total_tokens);
                             usage_callback(usage);
                         }
