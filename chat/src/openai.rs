@@ -17,8 +17,10 @@ pub struct OpenAIChatCompletionsProvider {
 }
 
 impl OpenAIChatCompletionsProvider {
-    pub fn new(openai_api_key: String) -> Self {
-        Self { openai_api_key }
+    pub fn new(openai_api_key: &str) -> Self {
+        Self {
+            openai_api_key: openai_api_key.to_string(),
+        }
     }
 }
 

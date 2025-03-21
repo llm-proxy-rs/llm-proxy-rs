@@ -11,6 +11,7 @@ use chat::{
 };
 use config::{Config, File};
 use request::{ChatCompletionsRequest, StreamOptions};
+use response::Usage;
 use tracing::{debug, error, info};
 
 mod error;
@@ -44,6 +45,13 @@ async fn chat_completions(
         include_usage: true,
     });
 
+    let usage_callback = |usage: &Usage| {
+        info!(
+            "Usage: prompt_tokens: {}, completion_tokens: {}, total_tokens: {}",
+            usage.prompt_tokens, usage.completion_tokens, usage.total_tokens
+        );
+    };
+
     let stream = if model_name.starts_with("gpt-") {
         info!("Using OpenAI provider for model: {}", payload.model);
         if let Some(openai_api_key) = state.openai_api_key {
@@ -53,13 +61,8 @@ async fn chat_completions(
                     "OpenAI API key is empty but OpenAI model was requested"
                 )));
             }
-            OpenAIChatCompletionsProvider::new(openai_api_key)
-                .chat_completions_stream(payload, |usage| {
-                    info!(
-                        "Usage: prompt_tokens: {}, completion_tokens: {}, total_tokens: {}",
-                        usage.prompt_tokens, usage.completion_tokens, usage.total_tokens
-                    );
-                })
+            OpenAIChatCompletionsProvider::new(&openai_api_key)
+                .chat_completions_stream(payload, usage_callback)
                 .await?
         } else {
             error!("OpenAI API key is not configured but OpenAI model was requested");
@@ -71,12 +74,7 @@ async fn chat_completions(
         info!("Using Bedrock provider for model: {}", payload.model);
         BedrockChatCompletionsProvider::new()
             .await
-            .chat_completions_stream(payload, |usage| {
-                info!(
-                    "Usage: prompt_tokens: {}, completion_tokens: {}, total_tokens: {}",
-                    usage.prompt_tokens, usage.completion_tokens, usage.total_tokens
-                );
-            })
+            .chat_completions_stream(payload, usage_callback)
             .await?
     };
 
