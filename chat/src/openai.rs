@@ -91,6 +91,6 @@ impl ChatCompletionsProvider for OpenAIChatCompletionsProvider {
             yield Ok(Event::default().data(DONE_MESSAGE));
         };
 
-        Ok(Box::pin(stream))
+        Ok(stream.boxed())
     }
 }
