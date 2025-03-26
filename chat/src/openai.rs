@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use axum::response::sse::Event;
 use futures::StreamExt;
 use futures::stream::BoxStream;
-use request::ChatCompletionsRequest;
+use request::{ChatCompletionsRequest, StreamOptions};
 use reqwest;
 use reqwest_streams::JsonStreamResponse as _;
 use response::{ChatCompletionsResponse, Usage};
@@ -28,7 +28,7 @@ impl OpenAIChatCompletionsProvider {
 impl ChatCompletionsProvider for OpenAIChatCompletionsProvider {
     async fn chat_completions_stream<F>(
         self,
-        request: ChatCompletionsRequest,
+        mut request: ChatCompletionsRequest,
         usage_callback: F,
     ) -> anyhow::Result<BoxStream<'async_trait, anyhow::Result<Event>>>
     where
@@ -38,6 +38,10 @@ impl ChatCompletionsProvider for OpenAIChatCompletionsProvider {
             "Starting OpenAI chat completion request with model: {}",
             request.model
         );
+
+        request.stream_options = Some(StreamOptions {
+            include_usage: true,
+        });
 
         let client = reqwest::Client::new();
         let response = client
