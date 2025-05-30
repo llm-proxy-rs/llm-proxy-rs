@@ -10,7 +10,6 @@ async-trait = "0.1.88"
 aws-config = "1.6.3"
 aws-sdk-bedrockruntime = "1.91.0"
 axum = "0.8.4"
-bedrock = { path = "../bedrock" }
 chrono = "0.4.41"
 futures = "0.3.31"
 request = { path = "../request" }
