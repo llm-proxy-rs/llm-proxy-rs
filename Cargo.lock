@@ -2029,6 +2029,7 @@ checksum = "2b15c43186be67a4fd63bee50d0303afffcef381492ebe2c5d87f324e1b8815c"
 name = "request"
 version = "0.1.0"
 dependencies = [
+ "aws-sdk-bedrockruntime",
  "serde",
 ]
 
@@ -2079,9 +2080,9 @@ dependencies = [
 
 [[package]]
 name = "reqwest-streams"
-version = "0.9.0"
+version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a7c5c3436b21f323e34b937f18b090a99c459b5065c710bee637645ebc703532"
+checksum = "d12c3e90a6c6be9ffe735a2536c1fec9bfe1694912ccd8e93fb02f387b5d068a"
 dependencies = [
  "async-trait",
  "bytes",

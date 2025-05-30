@@ -4,19 +4,19 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-anyhow = "1.0.95"
+anyhow = "1.0.98"
 async-stream = "0.3.6"
-async-trait = "0.1.86"
-aws-config = "1.5.16"
-aws-sdk-bedrockruntime = "1.73.0"
-axum = "0.8.1"
+async-trait = "0.1.88"
+aws-config = "1.6.3"
+aws-sdk-bedrockruntime = "1.91.0"
+axum = "0.8.4"
 bedrock = { path = "../bedrock" }
-chrono = "0.4.39"
+chrono = "0.4.41"
 futures = "0.3.31"
 request = { path = "../request" }
-uuid = { version = "1.13.1", features = ["v4"] }
+uuid = { version = "1.17.0", features = ["v4"] }
 response = { path = "../response" }
-serde_json = "1.0.138"
+serde_json = "1.0.140"
 tracing = "0.1.41"
-reqwest = "0.12.15"
-reqwest-streams = { version = "0.9.0", features = ["json"] }
+reqwest = "0.12.18"
+reqwest-streams = { version = "0.10.0", features = ["json"] }

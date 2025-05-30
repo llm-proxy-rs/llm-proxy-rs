@@ -1,3 +1,4 @@
+use aws_sdk_bedrockruntime::types::{ContentBlock, SystemContentBlock};
 use serde::{
     Deserialize, Serialize,
     de::{self, SeqAccess, Visitor},
@@ -88,5 +89,33 @@ impl<'de> Visitor<'de> for Contents {
         let content_vec: Vec<Content> =
             Deserialize::deserialize(de::value::SeqAccessDeserializer::new(seq))?;
         Ok(Contents::Array(content_vec))
+    }
+}
+
+impl From<&Contents> for Vec<ContentBlock> {
+    fn from(contents: &Contents) -> Self {
+        match contents {
+            Contents::Array(arr) => arr
+                .iter()
+                .map(|c| match c {
+                    Content::Text { text } => ContentBlock::Text(text.clone()),
+                })
+                .collect(),
+            Contents::String(s) => vec![ContentBlock::Text(s.clone())],
+        }
+    }
+}
+
+impl From<&Contents> for Vec<SystemContentBlock> {
+    fn from(contents: &Contents) -> Self {
+        match contents {
+            Contents::Array(arr) => arr
+                .iter()
+                .map(|c| match c {
+                    Content::Text { text } => SystemContentBlock::Text(text.clone()),
+                })
+                .collect(),
+            Contents::String(s) => vec![SystemContentBlock::Text(s.clone())],
+        }
     }
 }
