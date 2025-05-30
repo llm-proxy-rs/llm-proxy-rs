@@ -1,8 +1,6 @@
 use aws_sdk_bedrockruntime::types::{ConversationRole, Message as BedrockMessage};
 use request::{Message as RequestMessage, Role};
 
-use crate::content_blocks::request_contents_to_bedrock_content_block;
-
 pub fn request_message_to_bedrock_message(
     request_message: &RequestMessage,
 ) -> Option<BedrockMessage> {
@@ -12,9 +10,7 @@ pub fn request_message_to_bedrock_message(
             Role::User => Some(ConversationRole::User),
             _ => None,
         })
-        .set_content(Some(request_contents_to_bedrock_content_block(
-            &request_message.contents,
-        )))
+        .set_content(Some((&request_message.contents).into()))
         .build()
         .ok()
 }
