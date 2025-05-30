@@ -687,6 +687,7 @@ dependencies = [
  "async-trait",
  "aws-config",
  "aws-sdk-bedrockruntime",
+ "aws-smithy-types",
  "axum",
  "chrono",
  "futures",
@@ -2021,7 +2022,9 @@ name = "request"
 version = "0.1.0"
 dependencies = [
  "aws-sdk-bedrockruntime",
+ "aws-smithy-types",
  "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -2092,6 +2095,7 @@ version = "0.1.0"
 dependencies = [
  "aws-sdk-bedrockruntime",
  "serde",
+ "serde_json",
 ]
 
 [[package]]
