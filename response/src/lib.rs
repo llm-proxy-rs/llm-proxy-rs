@@ -1,5 +1,5 @@
 use aws_sdk_bedrockruntime::types::{
-    ContentBlockDelta, ConversationRole, ConverseStreamOutput, StopReason,
+    ContentBlockDelta, ContentBlockStart, ConversationRole, ConverseStreamOutput, StopReason,
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -198,16 +198,50 @@ pub fn converse_stream_output_to_chat_completions_response_builder(
 
     match output {
         ConverseStreamOutput::ContentBlockDelta(event) => {
-            let delta = event
-                .delta
-                .as_ref()
-                .and_then(|d| match d {
-                    ContentBlockDelta::Text(text) => Some(text.clone()),
-                    _ => None,
-                })
-                .map(|content| Delta::Content {
-                    content: content.clone(),
-                });
+            let delta = event.delta.as_ref().and_then(|d| match d {
+                ContentBlockDelta::Text(text) => Some(Delta::Content {
+                    content: text.clone(),
+                }),
+                ContentBlockDelta::ToolUse(tool_use_delta) => {
+                    // Handle tool use delta - typically this is for streaming tool arguments
+                    let args = serde_json::to_string(&tool_use_delta.input).unwrap_or_default();
+                    Some(Delta::ToolCalls {
+                        tool_calls: vec![ToolCall {
+                            id: "".to_string(), // Will be set in ContentBlockStart
+                            r#type: "function".to_string(),
+                            function: FunctionCall {
+                                name: "".to_string(), // Will be set in ContentBlockStart
+                                arguments: args,
+                            },
+                        }],
+                    })
+                }
+                _ => None,
+            });
+
+            let choice = ChoiceBuilder::default()
+                .delta(delta)
+                .index(event.content_block_index)
+                .build();
+
+            builder = builder.choice(choice);
+        }
+        ConverseStreamOutput::ContentBlockStart(event) => {
+            let delta = event.start.as_ref().and_then(|start| match start {
+                ContentBlockStart::ToolUse(tool_start) => {
+                    Some(Delta::ToolCalls {
+                        tool_calls: vec![ToolCall {
+                            id: tool_start.tool_use_id.clone(),
+                            r#type: "function".to_string(),
+                            function: FunctionCall {
+                                name: tool_start.name.clone(),
+                                arguments: "".to_string(), // Arguments will come in delta events
+                            },
+                        }],
+                    })
+                }
+                _ => None,
+            });
 
             let choice = ChoiceBuilder::default()
                 .delta(delta)
@@ -232,6 +266,7 @@ pub fn converse_stream_output_to_chat_completions_response_builder(
             let choice = ChoiceBuilder::default()
                 .finish_reason(match event.stop_reason {
                     StopReason::EndTurn => Some("stop".to_string()),
+                    StopReason::ToolUse => Some("tool_calls".to_string()),
                     _ => None,
                 })
                 .build();

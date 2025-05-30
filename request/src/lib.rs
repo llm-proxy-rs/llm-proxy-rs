@@ -32,6 +32,11 @@ pub struct ChatCompletionsRequest {
     pub top_p: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub user: Option<String>,
+    // OpenAI-style tool definitions (will be converted to Bedrock format)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tools: Option<Vec<OpenAITool>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_choice: Option<OpenAIToolChoice>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -39,19 +44,71 @@ pub struct StreamOptions {
     pub include_usage: bool,
 }
 
+// OpenAI-style tool definition (for compatibility)
+#[derive(Debug, Deserialize, Serialize)]
+pub struct OpenAITool {
+    #[serde(rename = "type")]
+    pub tool_type: String,
+    pub function: OpenAIToolFunction,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct OpenAIToolFunction {
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    pub parameters: serde_json::Value,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(untagged)]
+pub enum OpenAIToolChoice {
+    String(String), // "none", "auto", "required"
+    Object {
+        #[serde(rename = "type")]
+        tool_type: String,
+        function: OpenAIToolChoiceFunction,
+    },
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct OpenAIToolChoiceFunction {
+    pub name: String,
+}
+
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Message {
     #[serde(rename = "content")]
     pub contents: Contents,
     pub role: Role,
+    // OpenAI-style tool calls (will be converted to Bedrock content blocks)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_calls: Option<Vec<OpenAIToolCall>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
+pub struct OpenAIToolCall {
+    pub id: String,
+    #[serde(rename = "type")]
+    pub tool_type: String,
+    pub function: OpenAIFunctionCall,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct OpenAIFunctionCall {
+    pub name: String,
+    pub arguments: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum Role {
     Assistant,
     System,
     User,
+    Tool,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -59,6 +116,7 @@ pub enum Role {
 pub enum Contents {
     Array(Vec<Content>),
     String(String),
+    Null,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -72,7 +130,7 @@ impl<'de> Visitor<'de> for Contents {
     type Value = Contents;
 
     fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        formatter.write_str("string or array")
+        formatter.write_str("string, array, or null")
     }
 
     fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
@@ -80,6 +138,20 @@ impl<'de> Visitor<'de> for Contents {
         E: de::Error,
     {
         Ok(Contents::String(value.to_string()))
+    }
+
+    fn visit_unit<E>(self) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        Ok(Contents::Null)
+    }
+
+    fn visit_none<E>(self) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        Ok(Contents::Null)
     }
 
     fn visit_seq<S>(self, seq: S) -> Result<Self::Value, S::Error>
@@ -92,6 +164,7 @@ impl<'de> Visitor<'de> for Contents {
     }
 }
 
+// Conversion implementations for Bedrock
 impl From<&Contents> for Vec<ContentBlock> {
     fn from(contents: &Contents) -> Self {
         match contents {
@@ -102,6 +175,7 @@ impl From<&Contents> for Vec<ContentBlock> {
                 })
                 .collect(),
             Contents::String(s) => vec![ContentBlock::Text(s.clone())],
+            Contents::Null => vec![],
         }
     }
 }
@@ -116,16 +190,7 @@ impl From<&Contents> for Vec<SystemContentBlock> {
                 })
                 .collect(),
             Contents::String(s) => vec![SystemContentBlock::Text(s.clone())],
-        }
-    }
-}
-
-impl From<&Role> for ConversationRole {
-    fn from(role: &Role) -> Self {
-        match role {
-            Role::Assistant => ConversationRole::Assistant,
-            Role::User => ConversationRole::User,
-            Role::System => unreachable!(),
+            Contents::Null => vec![],
         }
     }
 }
@@ -134,9 +199,22 @@ impl TryFrom<&Message> for aws_sdk_bedrockruntime::types::Message {
     type Error = aws_sdk_bedrockruntime::error::BuildError;
 
     fn try_from(message: &Message) -> Result<Self, Self::Error> {
-        aws_sdk_bedrockruntime::types::Message::builder()
-            .set_role(Some((&message.role).into()))
-            .set_content(Some((&message.contents).into()))
-            .build()
+        let content_blocks: Vec<ContentBlock> = (&message.contents).into();
+
+        match message.role {
+            Role::Assistant => aws_sdk_bedrockruntime::types::Message::builder()
+                .role(ConversationRole::Assistant)
+                .set_content(Some(content_blocks))
+                .build(),
+            Role::User => aws_sdk_bedrockruntime::types::Message::builder()
+                .role(ConversationRole::User)
+                .set_content(Some(content_blocks))
+                .build(),
+            // Skip system and tool messages - system goes to system_content_blocks, tools are not supported in messages
+            _ => Err(aws_sdk_bedrockruntime::error::BuildError::missing_field(
+                "role",
+                "Only User and Assistant roles are supported in messages",
+            )),
+        }
     }
 }
