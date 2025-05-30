@@ -1,10 +1,8 @@
 use serde::{
     Deserialize, Serialize,
-    de::{self, Deserializer, SeqAccess, Visitor},
+    de::{self, SeqAccess, Visitor},
 };
-use std::collections::HashMap;
-use std::{fmt, marker::PhantomData, str::FromStr};
-use void::Void;
+use std::{collections::HashMap, fmt};
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ChatCompletionsRequest {
@@ -42,7 +40,7 @@ pub struct StreamOptions {
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Message {
-    #[serde(rename = "content", deserialize_with = "string_or_array")]
+    #[serde(rename = "content")]
     pub contents: Contents,
     pub role: Role,
 }
@@ -69,44 +67,26 @@ pub enum Content {
     Text { text: String },
 }
 
-impl FromStr for Contents {
-    type Err = Void;
+impl<'de> Visitor<'de> for Contents {
+    type Value = Contents;
 
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(Contents::String(s.to_string()))
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str("string or array")
     }
-}
 
-pub fn string_or_array<'de, T, D>(deserializer: D) -> Result<T, D::Error>
-where
-    T: Deserialize<'de> + FromStr<Err = Void>,
-    D: Deserializer<'de>,
-{
-    struct StringOrArray<T>(PhantomData<fn() -> T>);
-
-    impl<'de, T> Visitor<'de> for StringOrArray<T>
+    fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
     where
-        T: Deserialize<'de> + FromStr<Err = Void>,
+        E: de::Error,
     {
-        type Value = T;
-
-        fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-            formatter.write_str("string or array")
-        }
-
-        fn visit_str<E>(self, value: &str) -> Result<T, E>
-        where
-            E: de::Error,
-        {
-            Ok(FromStr::from_str(value).expect("FromStr implementation for void cannot fail"))
-        }
-
-        fn visit_seq<S>(self, seq: S) -> Result<T, S::Error>
-        where
-            S: SeqAccess<'de>,
-        {
-            Deserialize::deserialize(de::value::SeqAccessDeserializer::new(seq))
-        }
+        Ok(Contents::String(value.to_string()))
     }
-    deserializer.deserialize_any(StringOrArray(PhantomData))
+
+    fn visit_seq<S>(self, seq: S) -> Result<Self::Value, S::Error>
+    where
+        S: SeqAccess<'de>,
+    {
+        let content_vec: Vec<Content> =
+            Deserialize::deserialize(de::value::SeqAccessDeserializer::new(seq))?;
+        Ok(Contents::Array(content_vec))
+    }
 }
