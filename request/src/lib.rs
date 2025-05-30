@@ -1,4 +1,4 @@
-use aws_sdk_bedrockruntime::types::{ContentBlock, SystemContentBlock};
+use aws_sdk_bedrockruntime::types::{ContentBlock, ConversationRole, SystemContentBlock};
 use serde::{
     Deserialize, Serialize,
     de::{self, SeqAccess, Visitor},
@@ -117,5 +117,26 @@ impl From<&Contents> for Vec<SystemContentBlock> {
                 .collect(),
             Contents::String(s) => vec![SystemContentBlock::Text(s.clone())],
         }
+    }
+}
+
+impl From<&Role> for ConversationRole {
+    fn from(role: &Role) -> Self {
+        match role {
+            Role::Assistant => ConversationRole::Assistant,
+            Role::User => ConversationRole::User,
+            Role::System => unreachable!(),
+        }
+    }
+}
+
+impl TryFrom<&Message> for aws_sdk_bedrockruntime::types::Message {
+    type Error = aws_sdk_bedrockruntime::error::BuildError;
+
+    fn try_from(message: &Message) -> Result<Self, Self::Error> {
+        aws_sdk_bedrockruntime::types::Message::builder()
+            .set_role(Some((&message.role).into()))
+            .set_content(Some((&message.contents).into()))
+            .build()
     }
 }

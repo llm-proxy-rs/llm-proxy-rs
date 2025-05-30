@@ -584,14 +584,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "bedrock"
-version = "0.1.0"
-dependencies = [
- "aws-sdk-bedrockruntime",
- "request",
-]
-
-[[package]]
 name = "bindgen"
 version = "0.69.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -696,7 +688,6 @@ dependencies = [
  "aws-config",
  "aws-sdk-bedrockruntime",
  "axum",
- "bedrock",
  "chrono",
  "futures",
  "request",
