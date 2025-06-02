@@ -116,7 +116,6 @@ pub enum Role {
 pub enum Contents {
     Array(Vec<Content>),
     String(String),
-    Null,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -130,7 +129,7 @@ impl<'de> Visitor<'de> for Contents {
     type Value = Contents;
 
     fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        formatter.write_str("string, array, or null")
+        formatter.write_str("string or array")
     }
 
     fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
@@ -138,20 +137,6 @@ impl<'de> Visitor<'de> for Contents {
         E: de::Error,
     {
         Ok(Contents::String(value.to_string()))
-    }
-
-    fn visit_unit<E>(self) -> Result<Self::Value, E>
-    where
-        E: de::Error,
-    {
-        Ok(Contents::Null)
-    }
-
-    fn visit_none<E>(self) -> Result<Self::Value, E>
-    where
-        E: de::Error,
-    {
-        Ok(Contents::Null)
     }
 
     fn visit_seq<S>(self, seq: S) -> Result<Self::Value, S::Error>
@@ -175,7 +160,6 @@ impl From<&Contents> for Vec<ContentBlock> {
                 })
                 .collect(),
             Contents::String(s) => vec![ContentBlock::Text(s.clone())],
-            Contents::Null => vec![],
         }
     }
 }
@@ -190,7 +174,6 @@ impl From<&Contents> for Vec<SystemContentBlock> {
                 })
                 .collect(),
             Contents::String(s) => vec![SystemContentBlock::Text(s.clone())],
-            Contents::Null => vec![],
         }
     }
 }
