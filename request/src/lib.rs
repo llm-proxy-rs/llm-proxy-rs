@@ -179,7 +179,7 @@ impl From<&Contents> for Vec<SystemContentBlock> {
 }
 
 impl TryFrom<&Message> for aws_sdk_bedrockruntime::types::Message {
-    type Error = aws_sdk_bedrockruntime::error::BuildError;
+    type Error = anyhow::Error;
 
     fn try_from(message: &Message) -> Result<Self, Self::Error> {
         let content_blocks: Vec<ContentBlock> = (&message.contents).into();
@@ -188,16 +188,18 @@ impl TryFrom<&Message> for aws_sdk_bedrockruntime::types::Message {
             Role::Assistant => aws_sdk_bedrockruntime::types::Message::builder()
                 .role(ConversationRole::Assistant)
                 .set_content(Some(content_blocks))
-                .build(),
+                .build()
+                .map_err(|e| anyhow::anyhow!("Failed to build Assistant message: {}", e)),
             Role::User => aws_sdk_bedrockruntime::types::Message::builder()
                 .role(ConversationRole::User)
                 .set_content(Some(content_blocks))
-                .build(),
+                .build()
+                .map_err(|e| anyhow::anyhow!("Failed to build User message: {}", e)),
             // Skip system and tool messages - system goes to system_content_blocks, tools are not supported in messages
-            _ => Err(aws_sdk_bedrockruntime::error::BuildError::missing_field(
-                "role",
-                "Only User and Assistant roles are supported in messages",
-            )),
+            _ => anyhow::bail!(
+                "Only User and Assistant roles are supported in messages, found: {:?}",
+                message.role
+            ),
         }
     }
 }
