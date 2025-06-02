@@ -22,7 +22,7 @@ pub fn process_chat_completions_request_to_bedrock_chat_completion(
 
     for request_message in &request.messages {
         match request_message.role {
-            Role::Assistant | Role::User | Role::Tool => {
+            Role::Assistant | Role::User => {
                 if let Ok(message) = Message::try_from(request_message) {
                     messages.push(message);
                 }
@@ -32,6 +32,7 @@ pub fn process_chat_completions_request_to_bedrock_chat_completion(
                     (&request_message.contents).into();
                 system_content_blocks.extend(new_system_content_blocks);
             }
+            Role::Tool => {}
         }
     }
 
