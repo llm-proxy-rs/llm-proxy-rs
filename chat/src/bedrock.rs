@@ -1,3 +1,4 @@
+use anyhow::Result;
 use aws_sdk_bedrockruntime::types::{
     AnyToolChoice, AutoToolChoice, Message, SpecificToolChoice, SystemContentBlock, Tool,
     ToolChoice, ToolConfiguration, ToolInputSchema, ToolSpecification,
@@ -15,7 +16,7 @@ pub struct BedrockChatCompletion {
 
 pub fn process_chat_completions_request_to_bedrock_chat_completion(
     request: &ChatCompletionsRequest,
-) -> BedrockChatCompletion {
+) -> Result<BedrockChatCompletion> {
     let mut system_content_blocks = Vec::new();
     let mut messages = Vec::new();
     let model_id = request.model.clone();
@@ -40,20 +41,21 @@ pub fn process_chat_completions_request_to_bedrock_chat_completion(
     let tool_config = request
         .tools
         .as_ref()
-        .map(|tools| convert_openai_tools_to_bedrock_tool_config(tools, &request.tool_choice));
+        .map(|tools| convert_openai_tools_to_bedrock_tool_config(tools, &request.tool_choice))
+        .transpose()?;
 
-    BedrockChatCompletion {
+    Ok(BedrockChatCompletion {
         model_id,
         system_content_blocks,
         messages,
         tool_config,
-    }
+    })
 }
 
 fn convert_openai_tools_to_bedrock_tool_config(
     openai_tools: &[OpenAITool],
     tool_choice: &Option<OpenAIToolChoice>,
-) -> ToolConfiguration {
+) -> Result<ToolConfiguration> {
     let mut builder = ToolConfiguration::builder();
 
     // Convert tools
@@ -64,8 +66,7 @@ fn convert_openai_tools_to_bedrock_tool_config(
             .input_schema(ToolInputSchema::Json(convert_json_value_to_document(
                 &openai_tool.function.parameters,
             )))
-            .build()
-            .expect("Failed to build ToolSpecification");
+            .build()?;
 
         builder = builder.tools(Tool::ToolSpec(tool_spec));
     }
@@ -74,21 +75,17 @@ fn convert_openai_tools_to_bedrock_tool_config(
     if let Some(choice) = tool_choice {
         let bedrock_choice = match choice {
             OpenAIToolChoice::String(s) => match s.as_str() {
-                "auto" => ToolChoice::Auto(AutoToolChoice::builder().build()),
-                "required" | "any" => ToolChoice::Any(AnyToolChoice::builder().build()),
-                _ => ToolChoice::Auto(AutoToolChoice::builder().build()), // Default to auto
+                "required" => ToolChoice::Any(AnyToolChoice::builder().build()),
+                _ => ToolChoice::Auto(AutoToolChoice::builder().build()),
             },
-            OpenAIToolChoice::Object { function, .. } => ToolChoice::Tool(
-                SpecificToolChoice::builder()
-                    .name(&function.name)
-                    .build()
-                    .expect("Failed to build SpecificToolChoice"),
-            ),
+            OpenAIToolChoice::Object { function, .. } => {
+                ToolChoice::Tool(SpecificToolChoice::builder().name(&function.name).build()?)
+            }
         };
         builder = builder.tool_choice(bedrock_choice);
     }
 
-    builder.build().expect("Failed to build ToolConfiguration")
+    Ok(builder.build()?)
 }
 
 fn convert_json_value_to_document(value: &serde_json::Value) -> Document {

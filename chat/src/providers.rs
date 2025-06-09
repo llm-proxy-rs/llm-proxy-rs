@@ -38,7 +38,7 @@ impl ProcessChatCompletionsRequest<BedrockChatCompletion> for BedrockChatComplet
     fn process_chat_completions_request(
         &self,
         request: &ChatCompletionsRequest,
-    ) -> BedrockChatCompletion {
+    ) -> anyhow::Result<BedrockChatCompletion> {
         process_chat_completions_request_to_bedrock_chat_completion(request)
     }
 }
@@ -57,7 +57,7 @@ impl ChatCompletionsProvider for BedrockChatCompletionsProvider {
             "Processing chat completions request for model: {}",
             request.model
         );
-        let bedrock_chat_completion = self.process_chat_completions_request(&request);
+        let bedrock_chat_completion = self.process_chat_completions_request(&request)?;
         info!(
             "Processed request to Bedrock format with {} messages",
             bedrock_chat_completion.messages.len()
