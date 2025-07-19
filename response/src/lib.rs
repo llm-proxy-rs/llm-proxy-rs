@@ -36,7 +36,6 @@ pub enum Delta {
     Content { content: String },
     Role { role: String },
     ToolCalls { tool_calls: Vec<ToolCall> },
-    FunctionCall { function_call: Function },
     Empty {},
 }
 
