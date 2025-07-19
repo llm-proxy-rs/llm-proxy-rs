@@ -32,7 +32,6 @@ pub struct ChatCompletionsRequest {
     pub top_p: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub user: Option<String>,
-    // OpenAI-style tool definitions (will be converted to Bedrock format)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tools: Option<Vec<OpenAITool>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -44,7 +43,6 @@ pub struct StreamOptions {
     pub include_usage: bool,
 }
 
-// OpenAI-style tool definition (for compatibility)
 #[derive(Debug, Deserialize, Serialize)]
 pub struct OpenAITool {
     #[serde(rename = "type")]
@@ -81,7 +79,6 @@ pub struct Message {
     #[serde(rename = "content")]
     pub contents: Contents,
     pub role: Role,
-    // OpenAI-style tool calls (will be converted to Bedrock content blocks)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_calls: Option<Vec<OpenAIToolCall>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -149,7 +146,6 @@ impl<'de> Visitor<'de> for Contents {
     }
 }
 
-// Conversion implementations for Bedrock
 impl From<&Contents> for Vec<ContentBlock> {
     fn from(contents: &Contents) -> Self {
         match contents {
@@ -189,13 +185,12 @@ impl TryFrom<&Message> for aws_sdk_bedrockruntime::types::Message {
                 .role(ConversationRole::Assistant)
                 .set_content(Some(content_blocks))
                 .build()
-                .map_err(|e| anyhow::anyhow!("Failed to build Assistant message: {}", e)),
+                .map_err(|e| anyhow::anyhow!("Failed to build Assistant message: {e}")),
             Role::User => aws_sdk_bedrockruntime::types::Message::builder()
                 .role(ConversationRole::User)
                 .set_content(Some(content_blocks))
                 .build()
-                .map_err(|e| anyhow::anyhow!("Failed to build User message: {}", e)),
-            // Skip system and tool messages - system goes to system_content_blocks, tools are not supported in messages
+                .map_err(|e| anyhow::anyhow!("Failed to build User message: {e}")),
             _ => anyhow::bail!(
                 "Only User and Assistant roles are supported in messages, found: {:?}",
                 message.role

@@ -5,7 +5,7 @@ use aws_sdk_bedrockruntime::types::{
 };
 use aws_smithy_types::Document;
 use request::{ChatCompletionsRequest, OpenAITool, OpenAIToolChoice, Role};
-use std::collections::HashMap;
+use serde_json::Value;
 
 pub struct BedrockChatCompletion {
     pub model_id: String,
@@ -37,7 +37,6 @@ pub fn process_chat_completions_request_to_bedrock_chat_completion(
         }
     }
 
-    // Convert OpenAI tools to Bedrock ToolConfiguration
     let tool_config = request
         .tools
         .as_ref()
@@ -54,16 +53,15 @@ pub fn process_chat_completions_request_to_bedrock_chat_completion(
 
 fn convert_openai_tools_to_bedrock_tool_config(
     openai_tools: &[OpenAITool],
-    tool_choice: &Option<OpenAIToolChoice>,
+    openai_tool_choice: &Option<OpenAIToolChoice>,
 ) -> Result<ToolConfiguration> {
     let mut builder = ToolConfiguration::builder();
 
-    // Convert tools
     for openai_tool in openai_tools {
         let tool_spec = ToolSpecification::builder()
             .name(&openai_tool.function.name)
             .set_description(openai_tool.function.description.clone())
-            .input_schema(ToolInputSchema::Json(convert_json_value_to_document(
+            .input_schema(ToolInputSchema::Json(convert_value_to_document(
                 &openai_tool.function.parameters,
             )))
             .build()?;
@@ -71,50 +69,44 @@ fn convert_openai_tools_to_bedrock_tool_config(
         builder = builder.tools(Tool::ToolSpec(tool_spec));
     }
 
-    // Convert tool choice
-    if let Some(choice) = tool_choice {
-        let bedrock_choice = match choice {
+    if let Some(openai_tool_choice) = openai_tool_choice {
+        let bedrock_tool_choice = match openai_tool_choice {
             OpenAIToolChoice::String(s) => match s.as_str() {
-                "required" => ToolChoice::Any(AnyToolChoice::builder().build()),
-                _ => ToolChoice::Auto(AutoToolChoice::builder().build()),
+                "none" => None,
+                "required" => Some(ToolChoice::Any(AnyToolChoice::builder().build())),
+                _ => Some(ToolChoice::Auto(AutoToolChoice::builder().build())),
             },
-            OpenAIToolChoice::Object { function, .. } => {
-                ToolChoice::Tool(SpecificToolChoice::builder().name(&function.name).build()?)
-            }
+            OpenAIToolChoice::Object { function, .. } => Some(ToolChoice::Tool(
+                SpecificToolChoice::builder().name(&function.name).build()?,
+            )),
         };
-        builder = builder.tool_choice(bedrock_choice);
+        builder = builder.set_tool_choice(bedrock_tool_choice);
     }
 
     Ok(builder.build()?)
 }
 
-fn convert_json_value_to_document(value: &serde_json::Value) -> Document {
+fn convert_value_to_document(value: &Value) -> Document {
     match value {
-        serde_json::Value::Null => Document::Null,
-        serde_json::Value::Bool(b) => Document::Bool(*b),
-        serde_json::Value::Number(n) => {
+        Value::Null => Document::Null,
+        Value::Bool(b) => Document::Bool(*b),
+        Value::Number(n) => {
             if let Some(i) = n.as_i64() {
-                if i >= 0 {
-                    Document::Number(aws_smithy_types::Number::PosInt(i as u64))
+                Document::Number(if i >= 0 {
+                    aws_smithy_types::Number::PosInt(i as u64)
                 } else {
-                    Document::Number(aws_smithy_types::Number::NegInt(i))
-                }
-            } else if let Some(f) = n.as_f64() {
-                Document::Number(aws_smithy_types::Number::Float(f))
+                    aws_smithy_types::Number::NegInt(i)
+                })
             } else {
-                Document::Null
+                Document::Number(aws_smithy_types::Number::Float(n.as_f64().unwrap_or(0.0)))
             }
         }
-        serde_json::Value::String(s) => Document::String(s.clone()),
-        serde_json::Value::Array(arr) => {
-            Document::Array(arr.iter().map(convert_json_value_to_document).collect())
-        }
-        serde_json::Value::Object(obj) => {
-            let mut map = HashMap::new();
-            for (k, v) in obj {
-                map.insert(k.clone(), convert_json_value_to_document(v));
-            }
-            Document::Object(map)
-        }
+        Value::String(s) => Document::String(s.clone()),
+        Value::Array(a) => Document::Array(a.iter().map(convert_value_to_document).collect()),
+        Value::Object(o) => Document::Object(
+            o.iter()
+                .map(|(k, v)| (k.clone(), convert_value_to_document(v)))
+                .collect(),
+        ),
     }
 }
