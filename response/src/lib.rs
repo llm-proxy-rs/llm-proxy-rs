@@ -1,5 +1,6 @@
 use aws_sdk_bedrockruntime::types::{
     ContentBlockDelta, ContentBlockStart, ConversationRole, ConverseStreamOutput, StopReason,
+    ToolUseBlockDelta, ToolUseBlockStart,
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -192,6 +193,28 @@ impl UsageBuilder {
     }
 }
 
+fn tool_use_block_delta_to_tool_call(tool_use_block_delta: &ToolUseBlockDelta) -> ToolCall {
+    ToolCall {
+        id: None,
+        r#type: "function".to_string(),
+        function: Function {
+            name: None,
+            arguments: Some(tool_use_block_delta.input.clone()),
+        },
+    }
+}
+
+fn tool_use_block_start_to_tool_call(tool_use_block_start: &ToolUseBlockStart) -> ToolCall {
+    ToolCall {
+        id: Some(tool_use_block_start.tool_use_id().to_string()),
+        r#type: "function".to_string(),
+        function: Function {
+            name: Some(tool_use_block_start.name().to_string()),
+            arguments: None,
+        },
+    }
+}
+
 pub fn converse_stream_output_to_chat_completions_response_builder(
     output: &ConverseStreamOutput,
     usage_callback: Arc<dyn Fn(&Usage)>,
@@ -205,14 +228,7 @@ pub fn converse_stream_output_to_chat_completions_response_builder(
                     content: text.clone(),
                 }),
                 ContentBlockDelta::ToolUse(tool_use) => Some(Delta::ToolCalls {
-                    tool_calls: vec![ToolCall {
-                        id: None,
-                        r#type: "function".to_string(),
-                        function: Function {
-                            name: None,
-                            arguments: Some(tool_use.input.clone()),
-                        },
-                    }],
+                    tool_calls: vec![tool_use_block_delta_to_tool_call(tool_use)],
                 }),
                 _ => None,
             });
@@ -227,14 +243,7 @@ pub fn converse_stream_output_to_chat_completions_response_builder(
         ConverseStreamOutput::ContentBlockStart(event) => {
             let delta = event.start.as_ref().and_then(|start| match start {
                 ContentBlockStart::ToolUse(tool_use) => Some(Delta::ToolCalls {
-                    tool_calls: vec![ToolCall {
-                        id: Some(tool_use.tool_use_id().to_string()),
-                        r#type: "function".to_string(),
-                        function: Function {
-                            name: Some(tool_use.name().to_string()),
-                            arguments: None,
-                        },
-                    }],
+                    tool_calls: vec![tool_use_block_start_to_tool_call(tool_use)],
                 }),
                 _ => None,
             });

@@ -40,7 +40,7 @@ pub fn process_chat_completions_request_to_bedrock_chat_completion(
     let tool_config = request
         .tools
         .as_ref()
-        .map(|tools| convert_openai_tools_to_bedrock_tool_config(tools, &request.tool_choice))
+        .map(|tools| openai_tools_to_bedrock_tool_config(tools, &request.tool_choice))
         .transpose()?;
 
     Ok(BedrockChatCompletion {
@@ -51,7 +51,7 @@ pub fn process_chat_completions_request_to_bedrock_chat_completion(
     })
 }
 
-fn convert_openai_tools_to_bedrock_tool_config(
+fn openai_tools_to_bedrock_tool_config(
     openai_tools: &[OpenAITool],
     openai_tool_choice: &Option<OpenAIToolChoice>,
 ) -> Result<ToolConfiguration> {
@@ -61,7 +61,7 @@ fn convert_openai_tools_to_bedrock_tool_config(
         let tool_spec = ToolSpecification::builder()
             .name(&openai_tool.function.name)
             .set_description(openai_tool.function.description.clone())
-            .input_schema(ToolInputSchema::Json(convert_value_to_document(
+            .input_schema(ToolInputSchema::Json(value_to_document(
                 &openai_tool.function.parameters,
             )))
             .build()?;
@@ -86,7 +86,7 @@ fn convert_openai_tools_to_bedrock_tool_config(
     Ok(builder.build()?)
 }
 
-fn convert_value_to_document(value: &Value) -> Document {
+fn value_to_document(value: &Value) -> Document {
     match value {
         Value::Null => Document::Null,
         Value::Bool(b) => Document::Bool(*b),
@@ -102,10 +102,10 @@ fn convert_value_to_document(value: &Value) -> Document {
             }
         }
         Value::String(s) => Document::String(s.clone()),
-        Value::Array(a) => Document::Array(a.iter().map(convert_value_to_document).collect()),
+        Value::Array(a) => Document::Array(a.iter().map(value_to_document).collect()),
         Value::Object(o) => Document::Object(
             o.iter()
-                .map(|(k, v)| (k.clone(), convert_value_to_document(v)))
+                .map(|(k, v)| (k.clone(), value_to_document(v)))
                 .collect(),
         ),
     }
