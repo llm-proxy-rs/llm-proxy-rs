@@ -61,7 +61,7 @@ pub struct OpenAIToolFunction {
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(untagged)]
 pub enum OpenAIToolChoice {
-    String(String), // "none", "auto", "required"
+    String(String),
     Object {
         #[serde(rename = "type")]
         tool_type: String,

@@ -78,7 +78,6 @@ impl ChatCompletionsProvider for BedrockChatCompletionsProvider {
             .set_system(Some(bedrock_chat_completion.system_content_blocks))
             .set_messages(Some(bedrock_chat_completion.messages));
 
-        // Add tool configuration if present
         if let Some(tool_config) = bedrock_chat_completion.tool_config {
             debug!("Adding tool configuration to Bedrock request");
             converse_builder = converse_builder.tool_config(tool_config);
