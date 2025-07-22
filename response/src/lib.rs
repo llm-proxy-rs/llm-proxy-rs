@@ -1,5 +1,6 @@
 use aws_sdk_bedrockruntime::types::{
-    ContentBlockDelta, ConversationRole, ConverseStreamOutput, StopReason,
+    ContentBlockDelta, ContentBlockStart, ConversationRole, ConverseStreamOutput, StopReason,
+    ToolUseBlockDelta, ToolUseBlockStart,
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -36,21 +37,23 @@ pub enum Delta {
     Content { content: String },
     Role { role: String },
     ToolCalls { tool_calls: Vec<ToolCall> },
-    FunctionCall { function_call: FunctionCall },
     Empty {},
 }
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ToolCall {
-    pub id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
     pub r#type: String,
-    pub function: FunctionCall,
+    pub function: Function,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-pub struct FunctionCall {
-    pub name: String,
-    pub arguments: String,
+pub struct Function {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub arguments: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize, Serialize)]
@@ -190,6 +193,28 @@ impl UsageBuilder {
     }
 }
 
+fn tool_use_block_delta_to_tool_call(tool_use_block_delta: &ToolUseBlockDelta) -> ToolCall {
+    ToolCall {
+        id: None,
+        r#type: "function".to_string(),
+        function: Function {
+            name: None,
+            arguments: Some(tool_use_block_delta.input.clone()),
+        },
+    }
+}
+
+fn tool_use_block_start_to_tool_call(tool_use_block_start: &ToolUseBlockStart) -> ToolCall {
+    ToolCall {
+        id: Some(tool_use_block_start.tool_use_id().to_string()),
+        r#type: "function".to_string(),
+        function: Function {
+            name: Some(tool_use_block_start.name().to_string()),
+            arguments: None,
+        },
+    }
+}
+
 pub fn converse_stream_output_to_chat_completions_response_builder(
     output: &ConverseStreamOutput,
     usage_callback: Arc<dyn Fn(&Usage)>,
@@ -198,16 +223,30 @@ pub fn converse_stream_output_to_chat_completions_response_builder(
 
     match output {
         ConverseStreamOutput::ContentBlockDelta(event) => {
-            let delta = event
-                .delta
-                .as_ref()
-                .and_then(|d| match d {
-                    ContentBlockDelta::Text(text) => Some(text.clone()),
-                    _ => None,
-                })
-                .map(|content| Delta::Content {
-                    content: content.clone(),
-                });
+            let delta = event.delta.as_ref().and_then(|d| match d {
+                ContentBlockDelta::Text(text) => Some(Delta::Content {
+                    content: text.clone(),
+                }),
+                ContentBlockDelta::ToolUse(tool_use) => Some(Delta::ToolCalls {
+                    tool_calls: vec![tool_use_block_delta_to_tool_call(tool_use)],
+                }),
+                _ => None,
+            });
+
+            let choice = ChoiceBuilder::default()
+                .delta(delta)
+                .index(event.content_block_index)
+                .build();
+
+            builder = builder.choice(choice);
+        }
+        ConverseStreamOutput::ContentBlockStart(event) => {
+            let delta = event.start.as_ref().and_then(|start| match start {
+                ContentBlockStart::ToolUse(tool_use) => Some(Delta::ToolCalls {
+                    tool_calls: vec![tool_use_block_start_to_tool_call(tool_use)],
+                }),
+                _ => None,
+            });
 
             let choice = ChoiceBuilder::default()
                 .delta(delta)
@@ -231,7 +270,10 @@ pub fn converse_stream_output_to_chat_completions_response_builder(
         ConverseStreamOutput::MessageStop(event) => {
             let choice = ChoiceBuilder::default()
                 .finish_reason(match event.stop_reason {
-                    StopReason::EndTurn => Some("stop".to_string()),
+                    StopReason::EndTurn => Some("end_turn".to_string()),
+                    StopReason::ToolUse => Some("tool_use".to_string()),
+                    StopReason::MaxTokens => Some("max_tokens".to_string()),
+                    StopReason::StopSequence => Some("stop_sequence".to_string()),
                     _ => None,
                 })
                 .build();
