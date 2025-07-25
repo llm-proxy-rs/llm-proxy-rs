@@ -1,0 +1,120 @@
+use aws_sdk_bedrockruntime::types::{ToolResultBlock, ToolResultContentBlock, ToolUseBlock};
+use serde::{Deserialize, Serialize};
+
+use crate::{Content, Contents, Message};
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct Tool {
+    #[serde(rename = "type")]
+    pub tool_type: String,
+    pub function: ToolFunction,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct ToolFunction {
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    pub parameters: serde_json::Value,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(untagged)]
+pub enum ToolChoice {
+    String(String),
+    Object {
+        #[serde(rename = "type")]
+        tool_type: String,
+        function: ToolChoiceFunction,
+    },
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct ToolChoiceFunction {
+    pub name: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct ToolCall {
+    pub id: String,
+    #[serde(rename = "type")]
+    pub tool_type: String,
+    pub function: FunctionCall,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct FunctionCall {
+    pub name: String,
+    pub arguments: String,
+}
+
+impl From<&Contents> for Vec<ToolResultContentBlock> {
+    fn from(contents: &Contents) -> Self {
+        match contents {
+            Contents::String(s) => {
+                vec![ToolResultContentBlock::Text(s.clone())]
+            }
+            Contents::Array(a) => a
+                .iter()
+                .map(|c| match c {
+                    Content::Text { text } => ToolResultContentBlock::Text(text.clone()),
+                })
+                .collect(),
+        }
+    }
+}
+
+impl TryFrom<&Message> for ToolResultBlock {
+    type Error = anyhow::Error;
+
+    fn try_from(message: &Message) -> Result<Self, Self::Error> {
+        Ok(ToolResultBlock::builder()
+            .set_tool_use_id(message.tool_call_id.clone())
+            .set_content(message.contents.as_ref().map(|contents| contents.into()))
+            .build()?)
+    }
+}
+
+impl TryFrom<&ToolCall> for ToolUseBlock {
+    type Error = anyhow::Error;
+
+    fn try_from(tool_call: &ToolCall) -> Result<Self, Self::Error> {
+        let input = serde_json::from_str(&tool_call.function.arguments)
+            .map(|value| value_to_document(&value))?;
+
+        Ok(ToolUseBlock::builder()
+            .tool_use_id(&tool_call.id)
+            .name(&tool_call.function.name)
+            .input(input)
+            .build()?)
+    }
+}
+
+pub fn value_to_document(value: &serde_json::Value) -> aws_smithy_types::Document {
+    match value {
+        serde_json::Value::Null => aws_smithy_types::Document::Null,
+        serde_json::Value::Bool(b) => aws_smithy_types::Document::Bool(*b),
+        serde_json::Value::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                aws_smithy_types::Document::Number(if i >= 0 {
+                    aws_smithy_types::Number::PosInt(i as u64)
+                } else {
+                    aws_smithy_types::Number::NegInt(i)
+                })
+            } else {
+                aws_smithy_types::Document::Number(aws_smithy_types::Number::Float(
+                    n.as_f64().unwrap_or(0.0),
+                ))
+            }
+        }
+        serde_json::Value::String(s) => aws_smithy_types::Document::String(s.clone()),
+        serde_json::Value::Array(a) => {
+            aws_smithy_types::Document::Array(a.iter().map(value_to_document).collect())
+        }
+        serde_json::Value::Object(o) => aws_smithy_types::Document::Object(
+            o.iter()
+                .map(|(k, v)| (k.clone(), value_to_document(v)))
+                .collect(),
+        ),
+    }
+}
