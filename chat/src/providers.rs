@@ -72,16 +72,12 @@ impl ChatCompletionsProvider for BedrockChatCompletionsProvider {
             bedrock_chat_completion.model_id
         );
 
-        let mut converse_builder = client
+        let converse_builder = client
             .converse_stream()
             .model_id(&bedrock_chat_completion.model_id)
             .set_system(Some(bedrock_chat_completion.system_content_blocks))
-            .set_messages(Some(bedrock_chat_completion.messages));
-
-        if let Some(tool_config) = bedrock_chat_completion.tool_config {
-            debug!("Adding tool configuration to Bedrock request");
-            converse_builder = converse_builder.tool_config(tool_config);
-        }
+            .set_messages(Some(bedrock_chat_completion.messages))
+            .set_tool_config(bedrock_chat_completion.tool_config);
 
         let mut stream = converse_builder.send().await?.stream;
         info!("Successfully connected to Bedrock stream");

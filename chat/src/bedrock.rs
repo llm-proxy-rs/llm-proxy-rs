@@ -1,16 +1,15 @@
 use anyhow::Result;
 use aws_sdk_bedrockruntime::types::{
-    AnyToolChoice, AutoToolChoice, Message, SpecificToolChoice, SystemContentBlock, Tool,
-    ToolChoice, ToolConfiguration, ToolInputSchema, ToolSpecification,
+    AnyToolChoice, AutoToolChoice, Message, SpecificToolChoice, SystemContentBlock,
+    Tool as BedrockTool, ToolChoice as BedrockToolChoice, ToolConfiguration, ToolInputSchema,
+    ToolSpecification,
 };
-use aws_smithy_types::Document;
-use request::{ChatCompletionsRequest, OpenAITool, OpenAIToolChoice, Role};
-use serde_json::Value;
+use request::{ChatCompletionsRequest, Role, Tool, ToolChoice, value_to_document};
 
 pub struct BedrockChatCompletion {
     pub model_id: String,
-    pub system_content_blocks: Vec<SystemContentBlock>,
     pub messages: Vec<Message>,
+    pub system_content_blocks: Vec<SystemContentBlock>,
     pub tool_config: Option<ToolConfiguration>,
 }
 
@@ -19,21 +18,17 @@ pub fn process_chat_completions_request_to_bedrock_chat_completion(
 ) -> Result<BedrockChatCompletion> {
     let mut system_content_blocks = Vec::new();
     let mut messages = Vec::new();
-    let model_id = request.model.clone();
 
     for request_message in &request.messages {
         match request_message.role {
-            Role::Assistant | Role::User => {
-                if let Ok(message) = Message::try_from(request_message) {
-                    messages.push(message);
-                }
+            Role::Assistant | Role::Tool | Role::User => {
+                messages.push(Message::try_from(request_message)?);
             }
             Role::System => {
-                let new_system_content_blocks: Vec<SystemContentBlock> =
-                    (&request_message.contents).into();
-                system_content_blocks.extend(new_system_content_blocks);
+                if let Some(contents) = &request_message.contents {
+                    system_content_blocks.extend::<Vec<SystemContentBlock>>(contents.into());
+                }
             }
-            Role::Tool => {}
         }
     }
 
@@ -44,16 +39,16 @@ pub fn process_chat_completions_request_to_bedrock_chat_completion(
         .transpose()?;
 
     Ok(BedrockChatCompletion {
-        model_id,
-        system_content_blocks,
+        model_id: request.model.clone(),
         messages,
+        system_content_blocks,
         tool_config,
     })
 }
 
 fn openai_tools_to_bedrock_tool_config(
-    openai_tools: &[OpenAITool],
-    openai_tool_choice: &Option<OpenAIToolChoice>,
+    openai_tools: &[Tool],
+    openai_tool_choice: &Option<ToolChoice>,
 ) -> Result<ToolConfiguration> {
     let mut builder = ToolConfiguration::builder();
 
@@ -66,17 +61,17 @@ fn openai_tools_to_bedrock_tool_config(
             )))
             .build()?;
 
-        builder = builder.tools(Tool::ToolSpec(tool_spec));
+        builder = builder.tools(BedrockTool::ToolSpec(tool_spec));
     }
 
     if let Some(openai_tool_choice) = openai_tool_choice {
         let bedrock_tool_choice = match openai_tool_choice {
-            OpenAIToolChoice::String(s) => match s.as_str() {
+            ToolChoice::String(s) => match s.as_str() {
                 "none" => None,
-                "required" => Some(ToolChoice::Any(AnyToolChoice::builder().build())),
-                _ => Some(ToolChoice::Auto(AutoToolChoice::builder().build())),
+                "required" => Some(BedrockToolChoice::Any(AnyToolChoice::builder().build())),
+                _ => Some(BedrockToolChoice::Auto(AutoToolChoice::builder().build())),
             },
-            OpenAIToolChoice::Object { function, .. } => Some(ToolChoice::Tool(
+            ToolChoice::Object { function, .. } => Some(BedrockToolChoice::Tool(
                 SpecificToolChoice::builder().name(&function.name).build()?,
             )),
         };
@@ -84,29 +79,4 @@ fn openai_tools_to_bedrock_tool_config(
     }
 
     Ok(builder.build()?)
-}
-
-fn value_to_document(value: &Value) -> Document {
-    match value {
-        Value::Null => Document::Null,
-        Value::Bool(b) => Document::Bool(*b),
-        Value::Number(n) => {
-            if let Some(i) = n.as_i64() {
-                Document::Number(if i >= 0 {
-                    aws_smithy_types::Number::PosInt(i as u64)
-                } else {
-                    aws_smithy_types::Number::NegInt(i)
-                })
-            } else {
-                Document::Number(aws_smithy_types::Number::Float(n.as_f64().unwrap_or(0.0)))
-            }
-        }
-        Value::String(s) => Document::String(s.clone()),
-        Value::Array(a) => Document::Array(a.iter().map(value_to_document).collect()),
-        Value::Object(o) => Document::Object(
-            o.iter()
-                .map(|(k, v)| (k.clone(), value_to_document(v)))
-                .collect(),
-        ),
-    }
 }
