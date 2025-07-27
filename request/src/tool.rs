@@ -1,4 +1,9 @@
-use aws_sdk_bedrockruntime::types::{ToolResultBlock, ToolResultContentBlock, ToolUseBlock};
+use anyhow::Result;
+use aws_sdk_bedrockruntime::types::{
+    AnyToolChoice, AutoToolChoice, SpecificToolChoice, Tool as BedrockTool,
+    ToolChoice as BedrockToolChoice, ToolInputSchema, ToolResultBlock, ToolResultContentBlock,
+    ToolSpecification, ToolUseBlock,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::{Content, Contents, Message};
@@ -87,6 +92,43 @@ impl TryFrom<&ToolCall> for ToolUseBlock {
             .name(&tool_call.function.name)
             .input(input)
             .build()?)
+    }
+}
+
+impl TryFrom<&Tool> for BedrockTool {
+    type Error = anyhow::Error;
+
+    fn try_from(tool: &Tool) -> Result<Self, Self::Error> {
+        let tool_spec = ToolSpecification::builder()
+            .name(&tool.function.name)
+            .set_description(tool.function.description.clone())
+            .input_schema(ToolInputSchema::Json(value_to_document(
+                &tool.function.parameters,
+            )))
+            .build()?;
+
+        Ok(BedrockTool::ToolSpec(tool_spec))
+    }
+}
+
+impl TryFrom<&ToolChoice> for Option<BedrockToolChoice> {
+    type Error = anyhow::Error;
+
+    fn try_from(tool_choice: &ToolChoice) -> Result<Self, Self::Error> {
+        match tool_choice {
+            ToolChoice::String(s) => match s.as_str() {
+                "none" => Ok(None),
+                "required" => Ok(Some(BedrockToolChoice::Any(
+                    AnyToolChoice::builder().build(),
+                ))),
+                _ => Ok(Some(BedrockToolChoice::Auto(
+                    AutoToolChoice::builder().build(),
+                ))),
+            },
+            ToolChoice::Object { function, .. } => Ok(Some(BedrockToolChoice::Tool(
+                SpecificToolChoice::builder().name(&function.name).build()?,
+            ))),
+        }
     }
 }
 
