@@ -1,7 +1,12 @@
-use aws_sdk_bedrockruntime::types::{ToolResultBlock, ToolResultContentBlock, ToolUseBlock};
+use anyhow::Result;
+use aws_sdk_bedrockruntime::types::{
+    AnyToolChoice, AutoToolChoice, SpecificToolChoice, Tool as BedrockTool,
+    ToolChoice as BedrockToolChoice, ToolConfiguration, ToolInputSchema, ToolResultBlock,
+    ToolResultContentBlock, ToolSpecification, ToolUseBlock,
+};
 use serde::{Deserialize, Serialize};
 
-use crate::{Content, Contents, Message};
+use crate::{ChatCompletionsRequest, Content, Contents, Message};
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Tool {
@@ -87,6 +92,69 @@ impl TryFrom<&ToolCall> for ToolUseBlock {
             .name(&tool_call.function.name)
             .input(input)
             .build()?)
+    }
+}
+
+impl TryFrom<&Tool> for BedrockTool {
+    type Error = anyhow::Error;
+
+    fn try_from(tool: &Tool) -> Result<Self, Self::Error> {
+        let tool_spec = ToolSpecification::builder()
+            .name(&tool.function.name)
+            .set_description(tool.function.description.clone())
+            .input_schema(ToolInputSchema::Json(value_to_document(
+                &tool.function.parameters,
+            )))
+            .build()?;
+
+        Ok(BedrockTool::ToolSpec(tool_spec))
+    }
+}
+
+impl TryFrom<&ToolChoice> for Option<BedrockToolChoice> {
+    type Error = anyhow::Error;
+
+    fn try_from(tool_choice: &ToolChoice) -> Result<Self, Self::Error> {
+        match tool_choice {
+            ToolChoice::String(s) => match s.as_str() {
+                "none" => Ok(None),
+                "required" => Ok(Some(BedrockToolChoice::Any(
+                    AnyToolChoice::builder().build(),
+                ))),
+                _ => Ok(Some(BedrockToolChoice::Auto(
+                    AutoToolChoice::builder().build(),
+                ))),
+            },
+            ToolChoice::Object { function, .. } => Ok(Some(BedrockToolChoice::Tool(
+                SpecificToolChoice::builder().name(&function.name).build()?,
+            ))),
+        }
+    }
+}
+
+impl TryFrom<&ChatCompletionsRequest> for Option<ToolConfiguration> {
+    type Error = anyhow::Error;
+
+    fn try_from(request: &ChatCompletionsRequest) -> Result<Self, Self::Error> {
+        if request.tools.is_none() && request.tool_choice.is_none() {
+            return Ok(None);
+        }
+
+        let mut builder = ToolConfiguration::builder();
+
+        if let Some(tools) = &request.tools {
+            for tool in tools {
+                let bedrock_tool = BedrockTool::try_from(tool)?;
+                builder = builder.tools(bedrock_tool);
+            }
+        }
+
+        if let Some(tool_choice) = &request.tool_choice {
+            let bedrock_tool_choice = Option::<BedrockToolChoice>::try_from(tool_choice)?;
+            builder = builder.set_tool_choice(bedrock_tool_choice);
+        }
+
+        Ok(Some(builder.build()?))
     }
 }
 
