@@ -132,10 +132,14 @@ impl TryFrom<&ToolChoice> for Option<BedrockToolChoice> {
     }
 }
 
-impl TryFrom<&ChatCompletionsRequest> for ToolConfiguration {
+impl TryFrom<&ChatCompletionsRequest> for Option<ToolConfiguration> {
     type Error = anyhow::Error;
 
     fn try_from(request: &ChatCompletionsRequest) -> Result<Self, Self::Error> {
+        if request.tools.is_none() && request.tool_choice.is_none() {
+            return Ok(None);
+        }
+
         let mut builder = ToolConfiguration::builder();
 
         if let Some(tools) = &request.tools {
@@ -150,7 +154,7 @@ impl TryFrom<&ChatCompletionsRequest> for ToolConfiguration {
             builder = builder.set_tool_choice(bedrock_tool_choice);
         }
 
-        Ok(builder.build()?)
+        Ok(Some(builder.build()?))
     }
 }
 

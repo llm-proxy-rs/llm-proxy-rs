@@ -28,12 +28,12 @@ pub fn process_chat_completions_request_to_bedrock_chat_completion(
         }
     }
 
-    let tool_config = ToolConfiguration::try_from(request)?;
+    let tool_config = Option::<ToolConfiguration>::try_from(request)?;
 
     Ok(BedrockChatCompletion {
         model_id: request.model.clone(),
         messages,
         system_content_blocks,
-        tool_config: Some(tool_config),
+        tool_config,
     })
 }
