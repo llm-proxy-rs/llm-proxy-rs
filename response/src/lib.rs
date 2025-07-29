@@ -200,10 +200,9 @@ impl UsageBuilder {
 fn tool_use_block_delta_to_tool_call(
     tool_use_block_delta: &ToolUseBlockDelta,
     index: i32,
-    tool_id: Option<&str>,
 ) -> ToolCall {
     ToolCall {
-        id: tool_id.map(|id| id.to_string()),
+        id: None,
         tool_type: "function".to_string(),
         function: Some(Function {
             name: None,
@@ -217,9 +216,8 @@ fn tool_use_block_start_to_tool_call(
     tool_use_block_start: &ToolUseBlockStart,
     index: i32,
 ) -> ToolCall {
-    let tool_id = format!("tool_call_{index}");
     ToolCall {
-        id: Some(tool_id),
+        id: Some(tool_use_block_start.tool_use_id().to_string()),
         tool_type: "function".to_string(),
         function: Some(Function {
             name: Some(tool_use_block_start.name().to_string()),
@@ -243,14 +241,9 @@ pub fn converse_stream_output_to_chat_completions_response_builder(
                 }),
                 ContentBlockDelta::ToolUse(tool_use) => {
                     let index = event.content_block_index;
-                    let tool_id = format!("tool_call_{index}");
 
                     Some(Delta::ToolCalls {
-                        tool_calls: vec![tool_use_block_delta_to_tool_call(
-                            tool_use,
-                            index,
-                            Some(&tool_id),
-                        )],
+                        tool_calls: vec![tool_use_block_delta_to_tool_call(tool_use, index)],
                     })
                 }
                 _ => None,

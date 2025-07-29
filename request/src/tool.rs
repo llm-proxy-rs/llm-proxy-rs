@@ -1,12 +1,12 @@
 use anyhow::Result;
 use aws_sdk_bedrockruntime::types::{
     AnyToolChoice, AutoToolChoice, SpecificToolChoice, Tool as BedrockTool,
-    ToolChoice as BedrockToolChoice, ToolInputSchema, ToolResultBlock, ToolResultContentBlock,
-    ToolSpecification, ToolUseBlock,
+    ToolChoice as BedrockToolChoice, ToolConfiguration, ToolInputSchema, ToolResultBlock,
+    ToolResultContentBlock, ToolSpecification, ToolUseBlock,
 };
 use serde::{Deserialize, Serialize};
 
-use crate::{Content, Contents, Message};
+use crate::{ChatCompletionsRequest, Content, Contents, Message};
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Tool {
@@ -129,6 +129,28 @@ impl TryFrom<&ToolChoice> for Option<BedrockToolChoice> {
                 SpecificToolChoice::builder().name(&function.name).build()?,
             ))),
         }
+    }
+}
+
+impl TryFrom<&ChatCompletionsRequest> for ToolConfiguration {
+    type Error = anyhow::Error;
+
+    fn try_from(request: &ChatCompletionsRequest) -> Result<Self, Self::Error> {
+        let mut builder = ToolConfiguration::builder();
+
+        if let Some(tools) = &request.tools {
+            for tool in tools {
+                let bedrock_tool = BedrockTool::try_from(tool)?;
+                builder = builder.tools(bedrock_tool);
+            }
+        }
+
+        if let Some(tool_choice) = &request.tool_choice {
+            let bedrock_tool_choice = Option::<BedrockToolChoice>::try_from(tool_choice)?;
+            builder = builder.set_tool_choice(bedrock_tool_choice);
+        }
+
+        Ok(builder.build()?)
     }
 }
 

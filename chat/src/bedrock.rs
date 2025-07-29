@@ -1,9 +1,6 @@
 use anyhow::Result;
-use aws_sdk_bedrockruntime::types::{
-    Message, SystemContentBlock, Tool as BedrockTool, ToolChoice as BedrockToolChoice,
-    ToolConfiguration,
-};
-use request::{ChatCompletionsRequest, Role, Tool, ToolChoice};
+use aws_sdk_bedrockruntime::types::{Message, SystemContentBlock, ToolConfiguration};
+use request::{ChatCompletionsRequest, Role};
 
 pub struct BedrockChatCompletion {
     pub model_id: String,
@@ -31,37 +28,12 @@ pub fn process_chat_completions_request_to_bedrock_chat_completion(
         }
     }
 
-    let tool_config = build_tool_configuration(&request.tools, &request.tool_choice)?;
+    let tool_config = ToolConfiguration::try_from(request)?;
 
     Ok(BedrockChatCompletion {
         model_id: request.model.clone(),
         messages,
         system_content_blocks,
-        tool_config,
+        tool_config: Some(tool_config),
     })
-}
-
-fn build_tool_configuration(
-    tools: &Option<Vec<Tool>>,
-    tool_choice: &Option<ToolChoice>,
-) -> Result<Option<ToolConfiguration>> {
-    if tools.is_none() && tool_choice.is_none() {
-        return Ok(None);
-    }
-
-    let mut builder = ToolConfiguration::builder();
-
-    if let Some(tools) = tools {
-        for tool in tools {
-            let bedrock_tool = BedrockTool::try_from(tool)?;
-            builder = builder.tools(bedrock_tool);
-        }
-    }
-
-    if let Some(tool_choice) = tool_choice {
-        let bedrock_tool_choice = Option::<BedrockToolChoice>::try_from(tool_choice)?;
-        builder = builder.set_tool_choice(bedrock_tool_choice);
-    }
-
-    Ok(Some(builder.build()?))
 }
