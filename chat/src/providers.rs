@@ -123,7 +123,10 @@ impl ChatCompletionsProvider for BedrockChatCompletionsProvider {
             .model_id(&bedrock_chat_completion.model_id)
             .set_system(Some(bedrock_chat_completion.system_content_blocks))
             .set_messages(Some(bedrock_chat_completion.messages))
-            .set_tool_config(bedrock_chat_completion.tool_config);
+            .set_tool_config(bedrock_chat_completion.tool_config)
+            .set_additional_model_request_fields(
+                bedrock_chat_completion.additional_model_request_fields,
+            );
 
         let stream = converse_builder.send().await?.stream;
         info!("Successfully connected to Bedrock stream");

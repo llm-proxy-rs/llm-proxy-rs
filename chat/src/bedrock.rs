@@ -1,5 +1,6 @@
 use anyhow::Result;
 use aws_sdk_bedrockruntime::types::{Message, SystemContentBlock, ToolConfiguration};
+use aws_smithy_types::Document;
 use request::{ChatCompletionsRequest, Role};
 
 pub struct BedrockChatCompletion {
@@ -7,6 +8,7 @@ pub struct BedrockChatCompletion {
     pub messages: Vec<Message>,
     pub system_content_blocks: Vec<SystemContentBlock>,
     pub tool_config: Option<ToolConfiguration>,
+    pub additional_model_request_fields: Option<Document>,
 }
 
 pub fn process_chat_completions_request_to_bedrock_chat_completion(
@@ -30,10 +32,29 @@ pub fn process_chat_completions_request_to_bedrock_chat_completion(
 
     let tool_config = Option::<ToolConfiguration>::try_from(request)?;
 
+    let additional_model_request_fields = request.reasoning_effort.as_ref().map(|_| {
+        Document::Object(
+            [(
+                "thinking".to_string(),
+                Document::Object(
+                    [
+                        ("type".to_string(), Document::String("enabled".to_string())),
+                        ("budget_tokens".to_string(), Document::from(4096i32)),
+                    ]
+                    .into_iter()
+                    .collect(),
+                ),
+            )]
+            .into_iter()
+            .collect(),
+        )
+    });
+
     Ok(BedrockChatCompletion {
         model_id: request.model.clone(),
         messages,
         system_content_blocks,
         tool_config,
+        additional_model_request_fields,
     })
 }
