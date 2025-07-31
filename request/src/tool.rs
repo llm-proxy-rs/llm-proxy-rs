@@ -64,17 +64,38 @@ impl From<&Contents> for Vec<ToolResultContentBlock> {
                 .iter()
                 .map(|c| match c {
                     Content::Text { text } => ToolResultContentBlock::Text(text.clone()),
-                    Content::Image { image } => {
-                        let format = match image.format.to_lowercase().as_str() {
-                            "jpeg" | "jpg" => ImageFormat::Jpeg,
-                            "png" => ImageFormat::Png,
-                            "gif" => ImageFormat::Gif,
-                            "webp" => ImageFormat::Webp,
-                            _ => ImageFormat::Png, // default to PNG if unknown
+                    Content::ImageUrl { image_url } => {
+                        // Parse data URL format: data:image/jpeg;base64,<base64_data>
+                        let (format, base64_data) = if image_url.url.starts_with("data:image/") {
+                            let parts: Vec<&str> = image_url.url.split(',').collect();
+                            if parts.len() == 2 {
+                                let header = parts[0];
+                                let data = parts[1];
+                                
+                                // Extract format from header like "data:image/jpeg;base64"
+                                let format = if header.contains("jpeg") || header.contains("jpg") {
+                                    ImageFormat::Jpeg
+                                } else if header.contains("png") {
+                                    ImageFormat::Png
+                                } else if header.contains("gif") {
+                                    ImageFormat::Gif
+                                } else if header.contains("webp") {
+                                    ImageFormat::Webp
+                                } else {
+                                    ImageFormat::Jpeg // default
+                                };
+                                
+                                (format, data.to_string())
+                            } else {
+                                (ImageFormat::Jpeg, image_url.url.clone())
+                            }
+                        } else {
+                            // Assume it's raw base64 data
+                            (ImageFormat::Jpeg, image_url.url.clone())
                         };
                         
-                        // Decode base64 data using new API
-                        let image_bytes = match general_purpose::STANDARD.decode(&image.data) {
+                        // Decode base64 data
+                        let image_bytes = match general_purpose::STANDARD.decode(&base64_data) {
                             Ok(bytes) => bytes,
                             Err(_) => return ToolResultContentBlock::Text("Error: Invalid base64 image data".to_string()),
                         };
