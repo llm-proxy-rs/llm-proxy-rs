@@ -1,4 +1,6 @@
-use aws_sdk_bedrockruntime::types::{ContentBlock, SystemContentBlock, ImageBlock, ImageFormat, ImageSource};
+use aws_sdk_bedrockruntime::types::{
+    ContentBlock, ImageBlock, ImageFormat, ImageSource, SystemContentBlock,
+};
 use base64::{Engine as _, engine::general_purpose};
 use serde::{
     Deserialize, Serialize,
@@ -19,9 +21,7 @@ pub enum Content {
     #[serde(rename = "text")]
     Text { text: String },
     #[serde(rename = "image_url")]
-    ImageUrl { 
-        image_url: ImageUrl 
-    },
+    ImageUrl { image_url: ImageUrl },
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -67,7 +67,7 @@ impl From<&Contents> for Vec<ContentBlock> {
                             if parts.len() == 2 {
                                 let header = parts[0];
                                 let data = parts[1];
-                                
+
                                 // Extract format from header like "data:image/jpeg;base64"
                                 let format = if header.contains("jpeg") || header.contains("jpg") {
                                     ImageFormat::Jpeg
@@ -80,7 +80,7 @@ impl From<&Contents> for Vec<ContentBlock> {
                                 } else {
                                     ImageFormat::Jpeg // default
                                 };
-                                
+
                                 (format, data.to_string())
                             } else {
                                 (ImageFormat::Jpeg, image_url.url.clone())
@@ -89,22 +89,30 @@ impl From<&Contents> for Vec<ContentBlock> {
                             // Assume it's raw base64 data
                             (ImageFormat::Jpeg, image_url.url.clone())
                         };
-                        
+
                         // Decode base64 data
                         let image_bytes = match general_purpose::STANDARD.decode(&base64_data) {
                             Ok(bytes) => bytes,
-                            Err(_) => return ContentBlock::Text("Error: Invalid base64 image data".to_string()),
+                            Err(_) => {
+                                return ContentBlock::Text(
+                                    "Error: Invalid base64 image data".to_string(),
+                                );
+                            }
                         };
-                        
+
                         let image_block = match ImageBlock::builder()
                             .format(format)
                             .source(ImageSource::Bytes(image_bytes.into()))
                             .build()
                         {
                             Ok(block) => block,
-                            Err(_) => return ContentBlock::Text("Error: Failed to create image block".to_string()),
+                            Err(_) => {
+                                return ContentBlock::Text(
+                                    "Error: Failed to create image block".to_string(),
+                                );
+                            }
                         };
-                        
+
                         ContentBlock::Image(image_block)
                     }
                 })
@@ -122,7 +130,9 @@ impl From<&Contents> for Vec<SystemContentBlock> {
                 .map(|c| match c {
                     Content::Text { text } => SystemContentBlock::Text(text.clone()),
                     // System content blocks don't support images in AWS Bedrock
-                    Content::ImageUrl { .. } => SystemContentBlock::Text("Error: Images not supported in system messages".to_string()),
+                    Content::ImageUrl { .. } => SystemContentBlock::Text(
+                        "Error: Images not supported in system messages".to_string(),
+                    ),
                 })
                 .collect(),
             Contents::String(s) => vec![SystemContentBlock::Text(s.clone())],
