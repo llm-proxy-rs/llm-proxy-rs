@@ -3,6 +3,8 @@ use aws_sdk_bedrockruntime::types::{Message, SystemContentBlock, ToolConfigurati
 use aws_smithy_types::Document;
 use request::{ChatCompletionsRequest, Role};
 
+const THINKING_BUDGET_TOKENS: i32 = 4096;
+
 pub struct BedrockChatCompletion {
     pub model_id: String,
     pub messages: Vec<Message>,
@@ -39,7 +41,10 @@ pub fn process_chat_completions_request_to_bedrock_chat_completion(
                 Document::Object(
                     [
                         ("type".to_string(), Document::String("enabled".to_string())),
-                        ("budget_tokens".to_string(), Document::from(4096i32)),
+                        (
+                            "budget_tokens".to_string(),
+                            Document::from(THINKING_BUDGET_TOKENS),
+                        ),
                     ]
                     .into_iter()
                     .collect(),
