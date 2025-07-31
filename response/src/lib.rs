@@ -1,6 +1,6 @@
 use aws_sdk_bedrockruntime::types::{
-    ContentBlockDelta, ContentBlockStart, ConversationRole, ConverseStreamOutput, StopReason,
-    ToolUseBlockDelta, ToolUseBlockStart,
+    ContentBlockDelta, ContentBlockStart, ConversationRole, ConverseStreamOutput,
+    ReasoningContentBlockDelta, StopReason, ToolUseBlockDelta, ToolUseBlockStart,
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -37,6 +37,7 @@ pub enum Delta {
     Content { content: String },
     Role { role: String },
     ToolCalls { tool_calls: Vec<ToolCall> },
+    Reasoning { reasoning_content: String },
     Empty {},
 }
 
@@ -244,6 +245,11 @@ pub fn converse_stream_output_to_chat_completions_response_builder(
 
                     Some(Delta::ToolCalls {
                         tool_calls: vec![tool_use_block_delta_to_tool_call(tool_use, index)],
+                    })
+                }
+                ContentBlockDelta::ReasoningContent(ReasoningContentBlockDelta::Text(text)) => {
+                    Some(Delta::Reasoning {
+                        reasoning_content: text.clone(),
                     })
                 }
                 _ => None,
