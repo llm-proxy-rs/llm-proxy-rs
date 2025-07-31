@@ -2,8 +2,9 @@ use anyhow::Result;
 use aws_sdk_bedrockruntime::types::{
     AnyToolChoice, AutoToolChoice, SpecificToolChoice, Tool as BedrockTool,
     ToolChoice as BedrockToolChoice, ToolConfiguration, ToolInputSchema, ToolResultBlock,
-    ToolResultContentBlock, ToolSpecification, ToolUseBlock,
+    ToolResultContentBlock, ToolSpecification, ToolUseBlock, ImageBlock, ImageFormat, ImageSource,
 };
+use base64::{Engine as _, engine::general_purpose};
 use serde::{Deserialize, Serialize};
 
 use crate::{ChatCompletionsRequest, Content, Contents, Message};
@@ -63,6 +64,32 @@ impl From<&Contents> for Vec<ToolResultContentBlock> {
                 .iter()
                 .map(|c| match c {
                     Content::Text { text } => ToolResultContentBlock::Text(text.clone()),
+                    Content::Image { image } => {
+                        let format = match image.format.to_lowercase().as_str() {
+                            "jpeg" | "jpg" => ImageFormat::Jpeg,
+                            "png" => ImageFormat::Png,
+                            "gif" => ImageFormat::Gif,
+                            "webp" => ImageFormat::Webp,
+                            _ => ImageFormat::Png, // default to PNG if unknown
+                        };
+                        
+                        // Decode base64 data using new API
+                        let image_bytes = match general_purpose::STANDARD.decode(&image.data) {
+                            Ok(bytes) => bytes,
+                            Err(_) => return ToolResultContentBlock::Text("Error: Invalid base64 image data".to_string()),
+                        };
+                        
+                        let image_block = match ImageBlock::builder()
+                            .format(format)
+                            .source(ImageSource::Bytes(image_bytes.into()))
+                            .build()
+                        {
+                            Ok(block) => block,
+                            Err(_) => return ToolResultContentBlock::Text("Error: Failed to create image block".to_string()),
+                        };
+                        
+                        ToolResultContentBlock::Image(image_block)
+                    }
                 })
                 .collect(),
         }
