@@ -1,7 +1,7 @@
 use anyhow::Result;
 use aws_sdk_bedrockruntime::types::{Message, SystemContentBlock, ToolConfiguration};
 use aws_smithy_types::Document;
-use request::{ChatCompletionsRequest, Role};
+use request::ChatCompletionsRequest;
 
 const THINKING_BUDGET_TOKENS: i32 = 4096;
 
@@ -20,12 +20,14 @@ pub fn process_chat_completions_request_to_bedrock_chat_completion(
     let mut messages = Vec::new();
 
     for request_message in &request.messages {
-        match request_message.role {
-            Role::Assistant | Role::Tool | Role::User => {
+        match request_message {
+            request::Message::Assistant { .. }
+            | request::Message::Tool { .. }
+            | request::Message::User { .. } => {
                 messages.push(Message::try_from(request_message)?);
             }
-            Role::System => {
-                if let Some(contents) = &request_message.contents {
+            request::Message::System { contents } => {
+                if let Some(contents) = contents {
                     system_content_blocks.extend::<Vec<SystemContentBlock>>(contents.into());
                 }
             }
