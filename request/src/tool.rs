@@ -6,7 +6,7 @@ use aws_sdk_bedrockruntime::types::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::{ChatCompletionsRequest, Content, Contents, Message, process_image_url};
+use crate::{ChatCompletionsRequest, Content, Contents, process_image_url};
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Tool {
@@ -61,27 +61,32 @@ impl From<&Contents> for Vec<ToolResultContentBlock> {
             }
             Contents::Array(a) => a
                 .iter()
-                .map(|c| match c {
-                    Content::Text { text } => ToolResultContentBlock::Text(text.clone()),
-                    Content::ImageUrl { image_url } => match process_image_url(image_url) {
-                        Ok(image_block) => ToolResultContentBlock::Image(image_block),
-                        Err(error_msg) => {
-                            ToolResultContentBlock::Text(format!("Error: {error_msg}"))
+                .filter_map(|c| match c {
+                    Content::Text { text } => Some(ToolResultContentBlock::Text(text.clone())),
+                    Content::ImageUrl { image_url } => {
+                        match process_image_url(image_url) {
+                            Ok(image_block) => Some(ToolResultContentBlock::Image(image_block)),
+                            Err(_) => None, // Skip invalid images
                         }
-                    },
+                    }
                 })
                 .collect(),
         }
     }
 }
 
-impl TryFrom<&Message> for ToolResultBlock {
+pub struct ToolResultData<'a> {
+    pub contents: &'a Option<Contents>,
+    pub tool_call_id: &'a Option<String>,
+}
+
+impl TryFrom<ToolResultData<'_>> for ToolResultBlock {
     type Error = anyhow::Error;
 
-    fn try_from(message: &Message) -> Result<Self, Self::Error> {
+    fn try_from(data: ToolResultData) -> Result<Self, Self::Error> {
         Ok(ToolResultBlock::builder()
-            .set_tool_use_id(message.tool_call_id.clone())
-            .set_content(message.contents.as_ref().map(|contents| contents.into()))
+            .set_tool_use_id(data.tool_call_id.clone())
+            .set_content(data.contents.as_ref().map(|contents| contents.into()))
             .build()?)
     }
 }
