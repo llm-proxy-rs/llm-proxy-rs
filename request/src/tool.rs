@@ -1,13 +1,12 @@
 use anyhow::Result;
 use aws_sdk_bedrockruntime::types::{
-    AnyToolChoice, AutoToolChoice, ImageBlock, ImageFormat, ImageSource, SpecificToolChoice,
-    Tool as BedrockTool, ToolChoice as BedrockToolChoice, ToolConfiguration, ToolInputSchema,
-    ToolResultBlock, ToolResultContentBlock, ToolSpecification, ToolUseBlock,
+    AnyToolChoice, AutoToolChoice, SpecificToolChoice, Tool as BedrockTool,
+    ToolChoice as BedrockToolChoice, ToolConfiguration, ToolInputSchema, ToolResultBlock,
+    ToolResultContentBlock, ToolSpecification, ToolUseBlock,
 };
-use base64::{Engine as _, engine::general_purpose};
 use serde::{Deserialize, Serialize};
 
-use crate::{ChatCompletionsRequest, Content, Contents, Message};
+use crate::{ChatCompletionsRequest, Content, Contents, Message, process_image_url};
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Tool {
@@ -64,61 +63,12 @@ impl From<&Contents> for Vec<ToolResultContentBlock> {
                 .iter()
                 .map(|c| match c {
                     Content::Text { text } => ToolResultContentBlock::Text(text.clone()),
-                    Content::ImageUrl { image_url } => {
-                        // Parse data URL format: data:image/jpeg;base64,<base64_data>
-                        let (format, base64_data) = if image_url.url.starts_with("data:image/") {
-                            let parts: Vec<&str> = image_url.url.split(',').collect();
-                            if parts.len() == 2 {
-                                let header = parts[0];
-                                let data = parts[1];
-
-                                // Extract format from header like "data:image/jpeg;base64"
-                                let format = if header.contains("jpeg") || header.contains("jpg") {
-                                    ImageFormat::Jpeg
-                                } else if header.contains("png") {
-                                    ImageFormat::Png
-                                } else if header.contains("gif") {
-                                    ImageFormat::Gif
-                                } else if header.contains("webp") {
-                                    ImageFormat::Webp
-                                } else {
-                                    ImageFormat::Jpeg // default
-                                };
-
-                                (format, data.to_string())
-                            } else {
-                                (ImageFormat::Jpeg, image_url.url.clone())
-                            }
-                        } else {
-                            // Assume it's raw base64 data
-                            (ImageFormat::Jpeg, image_url.url.clone())
-                        };
-
-                        // Decode base64 data
-                        let image_bytes = match general_purpose::STANDARD.decode(&base64_data) {
-                            Ok(bytes) => bytes,
-                            Err(_) => {
-                                return ToolResultContentBlock::Text(
-                                    "Error: Invalid base64 image data".to_string(),
-                                );
-                            }
-                        };
-
-                        let image_block = match ImageBlock::builder()
-                            .format(format)
-                            .source(ImageSource::Bytes(image_bytes.into()))
-                            .build()
-                        {
-                            Ok(block) => block,
-                            Err(_) => {
-                                return ToolResultContentBlock::Text(
-                                    "Error: Failed to create image block".to_string(),
-                                );
-                            }
-                        };
-
-                        ToolResultContentBlock::Image(image_block)
-                    }
+                    Content::ImageUrl { image_url } => match process_image_url(image_url) {
+                        Ok(image_block) => ToolResultContentBlock::Image(image_block),
+                        Err(error_msg) => {
+                            ToolResultContentBlock::Text(format!("Error: {error_msg}"))
+                        }
+                    },
                 })
                 .collect(),
         }

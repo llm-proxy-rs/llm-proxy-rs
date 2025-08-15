@@ -8,6 +8,29 @@ use serde::{
 };
 use std::fmt;
 
+pub fn process_image_url(image_url: &ImageUrl) -> Result<ImageBlock, String> {
+    let (format, base64_data) = match image_url.url.as_str() {
+        url if url.starts_with("data:image/jpeg;base64,") => (ImageFormat::Jpeg, &url[23..]),
+        url if url.starts_with("data:image/jpg;base64,") => (ImageFormat::Jpeg, &url[22..]),
+        url if url.starts_with("data:image/png;base64,") => (ImageFormat::Png, &url[22..]),
+        url if url.starts_with("data:image/gif;base64,") => (ImageFormat::Gif, &url[22..]),
+        url if url.starts_with("data:image/webp;base64,") => (ImageFormat::Webp, &url[23..]),
+        _ => {
+            return Err("Invalid data URL format. Expected: data:image/{jpeg|jpg|png|gif|webp};base64,{data}".to_string());
+        }
+    };
+
+    let image_bytes = general_purpose::STANDARD
+        .decode(base64_data)
+        .map_err(|_| "Invalid base64 image data".to_string())?;
+
+    ImageBlock::builder()
+        .format(format)
+        .source(ImageSource::Bytes(image_bytes.into()))
+        .build()
+        .map_err(|_| "Failed to create image block".to_string())
+}
+
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(untagged)]
 pub enum Contents {
@@ -60,61 +83,10 @@ impl From<&Contents> for Vec<ContentBlock> {
                 .iter()
                 .map(|c| match c {
                     Content::Text { text } => ContentBlock::Text(text.clone()),
-                    Content::ImageUrl { image_url } => {
-                        // Parse data URL format: data:image/jpeg;base64,<base64_data>
-                        let (format, base64_data) = if image_url.url.starts_with("data:image/") {
-                            let parts: Vec<&str> = image_url.url.split(',').collect();
-                            if parts.len() == 2 {
-                                let header = parts[0];
-                                let data = parts[1];
-
-                                // Extract format from header like "data:image/jpeg;base64"
-                                let format = if header.contains("jpeg") || header.contains("jpg") {
-                                    ImageFormat::Jpeg
-                                } else if header.contains("png") {
-                                    ImageFormat::Png
-                                } else if header.contains("gif") {
-                                    ImageFormat::Gif
-                                } else if header.contains("webp") {
-                                    ImageFormat::Webp
-                                } else {
-                                    ImageFormat::Jpeg // default
-                                };
-
-                                (format, data.to_string())
-                            } else {
-                                (ImageFormat::Jpeg, image_url.url.clone())
-                            }
-                        } else {
-                            // Assume it's raw base64 data
-                            (ImageFormat::Jpeg, image_url.url.clone())
-                        };
-
-                        // Decode base64 data
-                        let image_bytes = match general_purpose::STANDARD.decode(&base64_data) {
-                            Ok(bytes) => bytes,
-                            Err(_) => {
-                                return ContentBlock::Text(
-                                    "Error: Invalid base64 image data".to_string(),
-                                );
-                            }
-                        };
-
-                        let image_block = match ImageBlock::builder()
-                            .format(format)
-                            .source(ImageSource::Bytes(image_bytes.into()))
-                            .build()
-                        {
-                            Ok(block) => block,
-                            Err(_) => {
-                                return ContentBlock::Text(
-                                    "Error: Failed to create image block".to_string(),
-                                );
-                            }
-                        };
-
-                        ContentBlock::Image(image_block)
-                    }
+                    Content::ImageUrl { image_url } => match process_image_url(image_url) {
+                        Ok(image_block) => ContentBlock::Image(image_block),
+                        Err(err) => ContentBlock::Text(format!("Error: {err}")),
+                    },
                 })
                 .collect(),
             Contents::String(s) => vec![ContentBlock::Text(s.clone())],
