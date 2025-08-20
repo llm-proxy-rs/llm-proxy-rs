@@ -1,6 +1,6 @@
 use anyhow::Result;
 use aws_sdk_bedrockruntime::types::{
-    AnyToolChoice, AutoToolChoice, SpecificToolChoice, Tool as BedrockTool,
+    AnyToolChoice, AutoToolChoice, ImageBlock, SpecificToolChoice, Tool as BedrockTool,
     ToolChoice as BedrockToolChoice, ToolConfiguration, ToolInputSchema, ToolResultBlock,
     ToolResultContentBlock, ToolSpecification, ToolUseBlock,
 };
@@ -61,8 +61,11 @@ impl From<&Contents> for Vec<ToolResultContentBlock> {
             }
             Contents::Array(a) => a
                 .iter()
-                .map(|c| match c {
-                    Content::Text { text } => ToolResultContentBlock::Text(text.clone()),
+                .filter_map(|c| match c {
+                    Content::Text { text } => Some(ToolResultContentBlock::Text(text.clone())),
+                    Content::ImageUrl { image_url } => {
+                        Option::<ImageBlock>::from(image_url).map(ToolResultContentBlock::Image)
+                    }
                 })
                 .collect(),
         }
@@ -73,9 +76,17 @@ impl TryFrom<&Message> for ToolResultBlock {
     type Error = anyhow::Error;
 
     fn try_from(message: &Message) -> Result<Self, Self::Error> {
+        let Message::Tool {
+            contents,
+            tool_call_id,
+        } = message
+        else {
+            unreachable!()
+        };
+
         Ok(ToolResultBlock::builder()
-            .set_tool_use_id(message.tool_call_id.clone())
-            .set_content(message.contents.as_ref().map(|contents| contents.into()))
+            .set_tool_use_id(tool_call_id.clone())
+            .set_content(contents.as_ref().map(|contents| contents.into()))
             .build()?)
     }
 }

@@ -3,18 +3,35 @@ use aws_sdk_bedrockruntime::types::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::content::Contents;
+use crate::content::{Contents, SystemContents};
 
 #[derive(Debug, Deserialize, Serialize)]
-pub struct Message {
-    #[serde(rename = "content")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub contents: Option<Contents>,
-    pub role: Role,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub tool_calls: Option<Vec<crate::ToolCall>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub tool_call_id: Option<String>,
+#[serde(tag = "role", rename_all = "lowercase")]
+pub enum Message {
+    System {
+        #[serde(rename = "content")]
+        #[serde(skip_serializing_if = "Option::is_none")]
+        contents: Option<SystemContents>,
+    },
+    User {
+        #[serde(rename = "content")]
+        #[serde(skip_serializing_if = "Option::is_none")]
+        contents: Option<Contents>,
+    },
+    Assistant {
+        #[serde(rename = "content")]
+        #[serde(skip_serializing_if = "Option::is_none")]
+        contents: Option<Contents>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        tool_calls: Option<Vec<crate::ToolCall>>,
+    },
+    Tool {
+        #[serde(rename = "content")]
+        #[serde(skip_serializing_if = "Option::is_none")]
+        contents: Option<Contents>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        tool_call_id: Option<String>,
+    },
 }
 
 #[derive(Debug, Deserialize, Serialize, PartialEq)]
@@ -30,18 +47,19 @@ impl TryFrom<&Message> for Option<Vec<ContentBlock>> {
     type Error = anyhow::Error;
 
     fn try_from(message: &Message) -> Result<Self, Self::Error> {
-        match message.role {
-            Role::Tool => Ok(Some(vec![ContentBlock::ToolResult(
+        match message {
+            Message::Tool { .. } => Ok(Some(vec![ContentBlock::ToolResult(
                 ToolResultBlock::try_from(message)?,
             )])),
-            Role::Assistant => {
-                let content_blocks = message
-                    .contents
+            Message::Assistant {
+                contents,
+                tool_calls,
+            } => {
+                let content_blocks = contents
                     .iter()
                     .flat_map(Vec::<ContentBlock>::from)
                     .chain(
-                        message
-                            .tool_calls
+                        tool_calls
                             .iter()
                             .flatten()
                             .map(ToolUseBlock::try_from)
@@ -57,8 +75,8 @@ impl TryFrom<&Message> for Option<Vec<ContentBlock>> {
                     Ok(Some(content_blocks))
                 }
             }
-            Role::User => Ok(message.contents.as_ref().map(|contents| contents.into())),
-            Role::System => unreachable!(),
+            Message::User { contents } => Ok(contents.as_ref().map(|contents| contents.into())),
+            Message::System { .. } => unreachable!(),
         }
     }
 }
@@ -67,16 +85,16 @@ impl TryFrom<&Message> for BedrockMessage {
     type Error = anyhow::Error;
 
     fn try_from(message: &Message) -> Result<Self, Self::Error> {
-        match message.role {
-            Role::Assistant => Ok(BedrockMessage::builder()
+        match message {
+            Message::Assistant { .. } => Ok(BedrockMessage::builder()
                 .role(ConversationRole::Assistant)
                 .set_content(Option::<Vec<ContentBlock>>::try_from(message)?)
                 .build()?),
-            Role::Tool | Role::User => Ok(BedrockMessage::builder()
+            Message::Tool { .. } | Message::User { .. } => Ok(BedrockMessage::builder()
                 .role(ConversationRole::User)
                 .set_content(Option::<Vec<ContentBlock>>::try_from(message)?)
                 .build()?),
-            Role::System => unreachable!(),
+            Message::System { .. } => unreachable!(),
         }
     }
 }
