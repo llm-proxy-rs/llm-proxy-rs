@@ -42,8 +42,7 @@ pub fn process_chat_completions_request_to_bedrock_chat_completion(
                     }
                 }
 
-                let bedrock_message =
-                    request::convert_tool_messages_to_bedrock_message(&tool_messages)?;
+                let bedrock_message = request::tool_messages_to_bedrock_message(&tool_messages)?;
                 messages.push(bedrock_message);
             }
             request::Message::System { contents } => {

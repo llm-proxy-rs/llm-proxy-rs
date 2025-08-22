@@ -94,9 +94,7 @@ impl TryFrom<&Message> for BedrockMessage {
     }
 }
 
-pub fn convert_tool_messages_to_bedrock_message(
-    messages: &[&Message],
-) -> anyhow::Result<BedrockMessage> {
+pub fn tool_messages_to_bedrock_message(messages: &[&Message]) -> anyhow::Result<BedrockMessage> {
     let mut contents = Vec::new();
 
     for message in messages {
