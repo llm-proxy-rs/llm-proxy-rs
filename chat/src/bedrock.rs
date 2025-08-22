@@ -19,12 +19,31 @@ pub fn process_chat_completions_request_to_bedrock_chat_completion(
     let mut system_content_blocks = Vec::new();
     let mut messages = Vec::new();
 
-    for request_message in &request.messages {
+    let mut message_iter = request.messages.iter().peekable();
+
+    while let Some(request_message) = message_iter.next() {
         match request_message {
-            request::Message::Assistant { .. }
-            | request::Message::Tool { .. }
-            | request::Message::User { .. } => {
+            request::Message::Assistant { .. } => {
                 messages.push(Message::try_from(request_message)?);
+            }
+            request::Message::User { .. } => {
+                messages.push(Message::try_from(request_message)?);
+            }
+            request::Message::Tool { .. } => {
+                let mut tool_messages = vec![request_message];
+
+                while let Some(next_message) = message_iter.peek() {
+                    if let request::Message::Tool { .. } = next_message {
+                        if let Some(tool_message) = message_iter.next() {
+                            tool_messages.push(tool_message);
+                        }
+                    } else {
+                        break;
+                    }
+                }
+
+                let bedrock_message = request::tool_messages_to_bedrock_message(&tool_messages)?;
+                messages.push(bedrock_message);
             }
             request::Message::System { contents } => {
                 if let Some(contents) = contents {
