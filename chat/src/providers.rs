@@ -124,6 +124,7 @@ impl ChatCompletionsProvider for BedrockChatCompletionsProvider {
             .set_system(Some(bedrock_chat_completion.system_content_blocks))
             .set_messages(Some(bedrock_chat_completion.messages))
             .set_tool_config(bedrock_chat_completion.tool_config)
+            .set_inference_config(Some(bedrock_chat_completion.inference_config))
             .set_additional_model_request_fields(
                 bedrock_chat_completion.additional_model_request_fields,
             );
