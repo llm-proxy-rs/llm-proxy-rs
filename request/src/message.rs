@@ -54,8 +54,8 @@ impl TryFrom<&Message> for Option<Vec<ContentBlock>> {
             Message::Assistant {
                 contents,
                 tool_calls,
-            } => {
-                let content_blocks = contents
+            } => Ok(Some(
+                contents
                     .iter()
                     .flat_map(Vec::<ContentBlock>::from)
                     .chain(
@@ -67,14 +67,8 @@ impl TryFrom<&Message> for Option<Vec<ContentBlock>> {
                             .into_iter()
                             .map(ContentBlock::ToolUse),
                     )
-                    .collect::<Vec<_>>();
-
-                if content_blocks.is_empty() {
-                    Ok(None)
-                } else {
-                    Ok(Some(content_blocks))
-                }
-            }
+                    .collect::<Vec<_>>(),
+            )),
             Message::User { contents } => Ok(contents.as_ref().map(|contents| contents.into())),
             Message::System { .. } => unreachable!(),
         }
@@ -90,11 +84,29 @@ impl TryFrom<&Message> for BedrockMessage {
                 .role(ConversationRole::Assistant)
                 .set_content(Option::<Vec<ContentBlock>>::try_from(message)?)
                 .build()?),
-            Message::Tool { .. } | Message::User { .. } => Ok(BedrockMessage::builder()
+            Message::Tool { .. } => unreachable!(),
+            Message::User { .. } => Ok(BedrockMessage::builder()
                 .role(ConversationRole::User)
                 .set_content(Option::<Vec<ContentBlock>>::try_from(message)?)
                 .build()?),
             Message::System { .. } => unreachable!(),
         }
     }
+}
+
+pub fn tool_messages_to_bedrock_message(messages: &[&Message]) -> anyhow::Result<BedrockMessage> {
+    let mut contents = Vec::new();
+
+    for message in messages {
+        if let Message::Tool { .. } = message
+            && let Some(content_blocks) = Option::<Vec<ContentBlock>>::try_from(*message)?
+        {
+            contents.extend(content_blocks);
+        }
+    }
+
+    Ok(BedrockMessage::builder()
+        .role(ConversationRole::User)
+        .set_content(Some(contents))
+        .build()?)
 }
