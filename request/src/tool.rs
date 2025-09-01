@@ -5,25 +5,38 @@ use aws_sdk_bedrockruntime::types::{
     ToolResultContentBlock, ToolSpecification, ToolUseBlock,
 };
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use crate::{ChatCompletionsRequest, Content, Contents, Message};
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Tool {
+    pub function: ToolFunction,
     #[serde(rename = "type")]
     pub tool_type: String,
-    pub function: ToolFunction,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+impl Tool {
+    pub fn builder() -> ToolBuilder {
+        ToolBuilder::default()
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct ToolFunction {
-    pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-    pub parameters: serde_json::Value,
+    pub name: String,
+    pub parameters: Value,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+impl ToolFunction {
+    pub fn builder() -> ToolFunctionBuilder {
+        ToolFunctionBuilder::default()
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(untagged)]
 pub enum ToolChoice {
     String(String),
@@ -34,12 +47,12 @@ pub enum ToolChoice {
     },
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ToolChoiceFunction {
     pub name: String,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ToolCall {
     pub id: String,
     #[serde(rename = "type")]
@@ -47,7 +60,7 @@ pub struct ToolCall {
     pub function: FunctionCall,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct FunctionCall {
     pub name: String,
     pub arguments: String,
@@ -85,8 +98,8 @@ impl TryFrom<&Message> for ToolResultBlock {
         };
 
         Ok(ToolResultBlock::builder()
-            .set_tool_use_id(tool_call_id.clone())
-            .set_content(contents.as_ref().map(|contents| contents.into()))
+            .set_content(Some(contents.into()))
+            .set_tool_use_id(Some(tool_call_id.clone()))
             .build()?)
     }
 }
@@ -195,5 +208,71 @@ pub fn value_to_document(value: &serde_json::Value) -> aws_smithy_types::Documen
                 .map(|(k, v)| (k.clone(), value_to_document(v)))
                 .collect(),
         ),
+    }
+}
+
+pub struct ToolFunctionBuilder {
+    description: Option<String>,
+    name: String,
+    parameters: Value,
+}
+
+impl Default for ToolFunctionBuilder {
+    fn default() -> Self {
+        Self {
+            description: None,
+            name: String::new(),
+            parameters: serde_json::Value::Null,
+        }
+    }
+}
+
+impl ToolFunctionBuilder {
+    pub fn description(mut self, description: Option<String>) -> Self {
+        self.description = description;
+        self
+    }
+
+    pub fn name(mut self, name: String) -> Self {
+        self.name = name;
+        self
+    }
+
+    pub fn parameters(mut self, parameters: Value) -> Self {
+        self.parameters = parameters;
+        self
+    }
+
+    pub fn build(self) -> ToolFunction {
+        ToolFunction {
+            description: self.description,
+            name: self.name,
+            parameters: self.parameters,
+        }
+    }
+}
+
+#[derive(Default)]
+pub struct ToolBuilder {
+    function: ToolFunction,
+    tool_type: String,
+}
+
+impl ToolBuilder {
+    pub fn function(mut self, function: ToolFunction) -> Self {
+        self.function = function;
+        self
+    }
+
+    pub fn tool_type(mut self, tool_type: String) -> Self {
+        self.tool_type = tool_type;
+        self
+    }
+
+    pub fn build(self) -> Tool {
+        Tool {
+            function: self.function,
+            tool_type: self.tool_type,
+        }
     }
 }

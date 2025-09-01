@@ -41,7 +41,7 @@ pub enum Delta {
     Empty {},
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ToolCall {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
@@ -53,7 +53,7 @@ pub struct ToolCall {
     pub index: Option<i32>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Function {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
