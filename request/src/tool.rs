@@ -269,10 +269,32 @@ impl ToolBuilder {
         self
     }
 
+    /// Convenience method to set the function name
+    pub fn name(mut self, name: &str) -> Self {
+        self.function.name = name.to_string();
+        self
+    }
+
+    /// Convenience method to set the function description
+    pub fn description(mut self, description: &str) -> Self {
+        self.function.description = Some(description.to_string());
+        self
+    }
+
+    /// Convenience method to set the function parameters
+    pub fn parameters(mut self, parameters: Value) -> Self {
+        self.function.parameters = parameters;
+        self
+    }
+
     pub fn build(self) -> Tool {
         Tool {
             function: self.function,
-            tool_type: self.tool_type,
+            tool_type: if self.tool_type.is_empty() {
+                "function".to_string()
+            } else {
+                self.tool_type
+            },
         }
     }
 }

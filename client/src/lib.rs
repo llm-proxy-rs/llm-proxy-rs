@@ -48,7 +48,7 @@ use std::{
 use tokio_stream::StreamExt;
 
 use request::tool::Tool as RequestTool;
-use request::{ChatCompletionsRequest, Message, ToolCall};
+use request::{ChatCompletionsRequest, Message, ToolCall, Contents};
 use response::{ChatCompletionsResponse, Delta, ToolCall as ResponseToolCall};
 use tool::{Tool, ToolResult};
 
@@ -233,14 +233,34 @@ impl Chat {
         handler: &mut dyn ResponseHandler,
     ) -> Result<()> {
         loop {
-            let tool_calls = self.send_request_and_collect_tools(&request).await?;
+            let assistant_message = self.send_request_and_get_assistant_message(&request).await?;
+
+            // If no message or no tool calls, we're done
+            let assistant_msg = match assistant_message {
+                Some(msg) => msg,
+                None => break,
+            };
+
+            let tool_calls = match &assistant_msg {
+                Message::Assistant { tool_calls: Some(tool_calls), .. } => {
+                    // Extract ResponseToolCall from request ToolCall for execution
+                    self.extract_response_tool_calls(tool_calls)
+                }
+                _ => break, // No tool calls, conversation is complete
+            };
 
             if tool_calls.is_empty() {
                 break;
             }
 
             let tool_results = self.execute_tool_calls(&tool_calls, handler).await?;
-            self.add_messages_to_request(&mut request, tool_calls, tool_results);
+            
+            // Add the assistant message and tool results to conversation
+            request.messages.push(assistant_msg);
+            for result in tool_results {
+                request.messages.push(result.into());
+            }
+            
             handler.on_continuation()?;
         }
 
@@ -313,28 +333,20 @@ impl Chat {
         Ok(tool_results)
     }
 
-    /// Add assistant and tool result messages to the request
-    fn add_messages_to_request(
-        &self,
-        request: &mut ChatCompletionsRequest,
-        complete_tool_calls: Vec<ResponseToolCall>,
-        tool_results: Vec<ToolResult>,
-    ) {
-        // Add assistant message with tool calls
-        let tool_calls_for_message = complete_tool_calls
-            .into_iter()
-            .map(|tc| self.convert_to_request_tool_call(tc))
-            .collect();
-
-        request.messages.push(Message::Assistant {
-            contents: None,
-            tool_calls: Some(tool_calls_for_message),
-        });
-
-        // Add tool result messages
-        for result in tool_results {
-            request.messages.push(result.into());
-        }
+    /// Extract ResponseToolCall from request ToolCall for execution
+    fn extract_response_tool_calls(&self, tool_calls: &[ToolCall]) -> Vec<ResponseToolCall> {
+        tool_calls
+            .iter()
+            .map(|tc| ResponseToolCall {
+                id: Some(tc.id.clone()),
+                tool_type: tc.tool_type.clone(),
+                function: Some(response::Function {
+                    name: Some(tc.function.name.clone()),
+                    arguments: Some(tc.function.arguments.clone()),
+                }),
+                index: None, // Not needed for execution
+            })
+            .collect()
     }
 
     /// Convert response tool call to request tool call
@@ -380,18 +392,18 @@ impl Chat {
         }
     }
 
-    /// Send request and collect tool calls from the response
-    async fn send_request_and_collect_tools(
+    /// Send request and get assistant message from response
+    async fn send_request_and_get_assistant_message(
         &self,
         request: &ChatCompletionsRequest,
-    ) -> Result<Vec<ResponseToolCall>> {
+    ) -> Result<Option<Message>> {
         let url = format!("{}/chat/completions", self.config.base_url);
 
         let response = self.send_http_request(&url, request).await?;
-        let tool_calls = self.process_streaming_response(response).await?;
+        let assistant_message = self.process_streaming_response(response).await?;
 
         println!(); // Final newline
-        Ok(tool_calls)
+        Ok(assistant_message)
     }
 
     /// Send HTTP request and return response
@@ -410,11 +422,11 @@ impl Chat {
         Ok(response)
     }
 
-    /// Process streaming response and collect tool calls
+    /// Process streaming response and build assistant message directly
     async fn process_streaming_response(
         &self,
         response: reqwest::Response,
-    ) -> Result<Vec<ResponseToolCall>> {
+    ) -> Result<Option<Message>> {
         let mut stream = response.bytes_stream();
         let mut content_buffer = String::new();
         let mut tool_calls_map: HashMap<String, ResponseToolCall> = HashMap::new();
@@ -433,7 +445,34 @@ impl Chat {
         }
 
         let tool_calls: Vec<ResponseToolCall> = tool_calls_map.into_values().collect();
-        Ok(tool_calls)
+        
+        // If no content and no tool calls, return None
+        if content_buffer.trim().is_empty() && tool_calls.is_empty() {
+            return Ok(None);
+        }
+
+        // Build the assistant message directly
+        let contents = if content_buffer.trim().is_empty() {
+            None
+        } else {
+            Some(Contents::String(content_buffer))
+        };
+
+        let request_tool_calls = if tool_calls.is_empty() {
+            None
+        } else {
+            Some(
+                tool_calls
+                    .into_iter()
+                    .map(|tc| self.convert_to_request_tool_call(tc))
+                    .collect(),
+            )
+        };
+
+        Ok(Some(Message::Assistant {
+            contents,
+            tool_calls: request_tool_calls,
+        }))
     }
 
     /// Process individual chunk lines
