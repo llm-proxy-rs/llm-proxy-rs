@@ -1,5 +1,7 @@
 use anyhow::Result;
-use aws_sdk_bedrockruntime::types::{Message, SystemContentBlock, ToolConfiguration};
+use aws_sdk_bedrockruntime::types::{
+    InferenceConfiguration, Message, SystemContentBlock, ToolConfiguration,
+};
 use aws_smithy_types::Document;
 use request::ChatCompletionsRequest;
 
@@ -10,6 +12,7 @@ pub struct BedrockChatCompletion {
     pub messages: Vec<Message>,
     pub system_content_blocks: Vec<SystemContentBlock>,
     pub tool_config: Option<ToolConfiguration>,
+    pub inference_config: InferenceConfiguration,
     pub additional_model_request_fields: Option<Document>,
 }
 
@@ -55,6 +58,12 @@ pub fn process_chat_completions_request_to_bedrock_chat_completion(
 
     let tool_config = Option::<ToolConfiguration>::try_from(request)?;
 
+    let inference_config = InferenceConfiguration::builder()
+        .set_max_tokens(request.max_tokens)
+        .set_temperature(request.temperature)
+        .set_top_p(request.top_p)
+        .build();
+
     let additional_model_request_fields = request.reasoning_effort.as_ref().map(|_| {
         Document::Object(
             [(
@@ -81,6 +90,7 @@ pub fn process_chat_completions_request_to_bedrock_chat_completion(
         messages,
         system_content_blocks,
         tool_config,
+        inference_config,
         additional_model_request_fields,
     })
 }
