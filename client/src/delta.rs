@@ -4,7 +4,7 @@ use anyhow::Result;
 use tokio_stream::StreamExt;
 
 use crate::ChatEventHandler;
-use request::{Contents, Message, ToolCall, FunctionCall};
+use request::{Contents, FunctionCall, Message, ToolCall};
 use response::{ChatCompletionsResponse, Delta, ToolCall as ResponseToolCall};
 
 pub struct DeltaProcessor<'a> {
@@ -77,9 +77,9 @@ impl<'a> DeltaProcessor<'a> {
     fn handle_response(&mut self, response: &ChatCompletionsResponse) -> Result<()> {
         if let Some(usage) = &response.usage {
             self.handler.on_usage(
-                usage.prompt_tokens as u32,
-                usage.completion_tokens as u32,
-                usage.total_tokens as u32,
+                usage.prompt_tokens,
+                usage.completion_tokens,
+                usage.total_tokens,
             )?;
         }
 
@@ -119,11 +119,12 @@ impl<'a> DeltaProcessor<'a> {
             return Ok(Vec::new());
         }
 
-        let mut tool_calls: std::collections::HashMap<i32, ToolCall> = std::collections::HashMap::new();
+        let mut tool_calls: std::collections::HashMap<i32, ToolCall> =
+            std::collections::HashMap::new();
 
         for chunk in &self.tool_call_chunks {
             let index = chunk.index.unwrap_or(0);
-            
+
             let tool_call = tool_calls.entry(index).or_insert_with(|| ToolCall {
                 id: String::new(),
                 tool_type: "function".to_string(),
@@ -144,10 +145,12 @@ impl<'a> DeltaProcessor<'a> {
                     tool_call.function.name = name.clone();
                 }
 
-                if let Some(args) = &function.arguments
-                    && !args.trim().is_empty() {
+                if let Some(args) = &function.arguments {
+                    // Only append non-empty arguments
+                    if !args.trim().is_empty() {
                         tool_call.function.arguments.push_str(args);
                     }
+                }
             }
         }
 
@@ -155,27 +158,27 @@ impl<'a> DeltaProcessor<'a> {
         let mut result: Vec<_> = tool_calls.into_values().collect();
         result.sort_by_key(|tc| tc.id.clone());
 
-        // Validate all tool calls have complete data
-        for tool_call in &result {
-            if tool_call.id.is_empty() || tool_call.function.name.is_empty() {
-                anyhow::bail!("Incomplete tool call: missing id or name");
-            }
-            
-            // Ensure arguments is valid JSON, default to empty object if empty
-            if tool_call.function.arguments.trim().is_empty() {
-                // We can't mutate here, so we'll create a new vector with corrected data
-            } else if serde_json::from_str::<serde_json::Value>(&tool_call.function.arguments).is_err() {
-                anyhow::bail!(
-                    "Invalid JSON in tool call arguments: {}",
-                    tool_call.function.arguments
-                );
-            }
-        }
-
-        // Fix empty arguments
+        // Validate and fix tool call arguments after all chunks are joined
         let result: Vec<ToolCall> = result.into_iter().map(|mut tc| {
+            // Validate required fields
+            if tc.id.is_empty() || tc.function.name.is_empty() {
+                eprintln!("Warning: Incomplete tool call: missing id or name");
+                return tc;
+            }
+            // Fix empty arguments
             if tc.function.arguments.trim().is_empty() {
                 tc.function.arguments = "{}".to_string();
+            } else {
+                // Validate the complete joined JSON
+                match serde_json::from_str::<serde_json::Value>(&tc.function.arguments) {
+                    Ok(_) => {
+                        // JSON is valid, keep as is
+                    }
+                    Err(_) => {
+                        eprintln!("Warning: Invalid JSON in tool call arguments after joining chunks: {}", tc.function.arguments);
+                        tc.function.arguments = "{}".to_string();
+                    }
+                }
             }
             tc
         }).collect();

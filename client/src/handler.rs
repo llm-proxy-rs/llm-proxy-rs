@@ -21,8 +21,8 @@ pub trait ChatEventHandler {
 
     fn on_usage(
         &mut self,
-        prompt_tokens: u32,
-        completion_tokens: u32,
-        total_tokens: u32,
+        prompt_tokens: i32,
+        completion_tokens: i32,
+        total_tokens: i32,
     ) -> Result<()>;
 }

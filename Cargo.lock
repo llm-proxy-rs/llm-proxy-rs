@@ -732,7 +732,9 @@ name = "client"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bytes",
  "chrono",
+ "futures-util",
  "request",
  "reqwest",
  "response",

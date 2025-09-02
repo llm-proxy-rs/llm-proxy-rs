@@ -53,8 +53,8 @@ pub mod delta;
 pub mod handler;
 pub mod tool;
 
-pub use handler::ChatEventHandler;
 use delta::DeltaProcessor;
+pub use handler::ChatEventHandler;
 
 pub struct Chat {
     pub config: config::ClientConfig,
