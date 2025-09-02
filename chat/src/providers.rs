@@ -14,7 +14,7 @@ use futures::stream::{BoxStream, StreamExt};
 use request::ChatCompletionsRequest;
 use response::{Usage, converse_stream_output_to_chat_completions_response_builder};
 use std::sync::Arc;
-use tracing::info;
+use tracing::{error, info};
 use uuid::Uuid;
 
 async fn process_bedrock_stream(
@@ -128,7 +128,13 @@ impl ChatCompletionsProvider for BedrockChatCompletionsProvider {
                 bedrock_chat_completion.additional_model_request_fields,
             );
 
-        let stream = converse_builder.send().await?.stream;
+        let stream = match converse_builder.send().await {
+            Ok(response) => response.stream,
+            Err(e) => {
+                error!("Failed to send request to Bedrock: {}", e);
+                return Err(e.into());
+            }
+        };
         info!("Successfully connected to Bedrock stream");
 
         let id = Uuid::new_v4().to_string();

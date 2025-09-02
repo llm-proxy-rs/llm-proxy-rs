@@ -1,6 +1,6 @@
 use anyhow::{Result, bail};
 use chrono;
-use client::{Chat, ResponseHandler, tool::Tool};
+use client::{Chat, ChatEventHandler, tool::Tool};
 use request::{Message, tool::Tool as RequestTool};
 use serde_json::json;
 use std::io::{self, Write};
@@ -80,10 +80,10 @@ impl Tool for TimeTool {
     }
 }
 
-/// CLI implementation of ResponseHandler for terminal output
+/// CLI implementation of ChatEventHandler for terminal output
 pub struct CliHandler;
 
-impl ResponseHandler for CliHandler {
+impl ChatEventHandler for CliHandler {
     fn on_role(&mut self, role: &str) -> Result<()> {
         println!("\n[{}]: ", role);
         io::stdout().flush()?;
