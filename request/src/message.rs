@@ -27,20 +27,23 @@ pub enum Message {
     },
     Tool {
         #[serde(rename = "content")]
-        #[serde(skip_serializing_if = "Option::is_none")]
-        contents: Option<Contents>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        tool_call_id: Option<String>,
+        contents: Contents,
+        tool_call_id: String,
     },
 }
 
-#[derive(Debug, Deserialize, Serialize, PartialEq)]
-#[serde(rename_all = "lowercase")]
-pub enum Role {
-    Assistant,
-    System,
-    User,
-    Tool,
+impl Message {
+    pub fn system(content: &str) -> Self {
+        Message::System {
+            contents: Some(SystemContents::String(content.to_string())),
+        }
+    }
+
+    pub fn user(content: &str) -> Self {
+        Message::User {
+            contents: Some(Contents::String(content.to_string())),
+        }
+    }
 }
 
 impl TryFrom<&Message> for Option<Vec<ContentBlock>> {

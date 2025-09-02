@@ -10,16 +10,16 @@ use crate::{ChatCompletionsRequest, Content, Contents, Message};
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Tool {
+    pub function: ToolFunction,
     #[serde(rename = "type")]
     pub tool_type: String,
-    pub function: ToolFunction,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 pub struct ToolFunction {
-    pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    pub name: String,
     pub parameters: serde_json::Value,
 }
 
@@ -85,8 +85,8 @@ impl TryFrom<&Message> for ToolResultBlock {
         };
 
         Ok(ToolResultBlock::builder()
-            .set_tool_use_id(tool_call_id.clone())
-            .set_content(contents.as_ref().map(|contents| contents.into()))
+            .set_tool_use_id(Some(tool_call_id.clone()))
+            .set_content(Some(contents.into()))
             .build()?)
     }
 }
@@ -166,6 +166,75 @@ impl TryFrom<&ChatCompletionsRequest> for Option<ToolConfiguration> {
         }
 
         Ok(Some(builder.build()?))
+    }
+}
+
+impl Tool {
+    pub fn builder() -> ToolBuilder {
+        ToolBuilder::default()
+    }
+}
+
+impl ToolFunction {
+    pub fn builder() -> ToolFunctionBuilder {
+        ToolFunctionBuilder::default()
+    }
+}
+
+#[derive(Default)]
+pub struct ToolBuilder {
+    function: ToolFunction,
+    tool_type: String,
+}
+
+#[derive(Default)]
+pub struct ToolFunctionBuilder {
+    description: Option<String>,
+    name: String,
+    parameters: serde_json::Value,
+}
+
+impl ToolBuilder {
+    pub fn function(mut self, function: ToolFunction) -> Self {
+        self.function = function;
+        self
+    }
+
+    pub fn tool_type(mut self, tool_type: String) -> Self {
+        self.tool_type = tool_type;
+        self
+    }
+
+    pub fn build(self) -> Tool {
+        Tool {
+            function: self.function,
+            tool_type: self.tool_type,
+        }
+    }
+}
+
+impl ToolFunctionBuilder {
+    pub fn description(mut self, description: Option<String>) -> Self {
+        self.description = description;
+        self
+    }
+
+    pub fn name(mut self, name: String) -> Self {
+        self.name = name;
+        self
+    }
+
+    pub fn parameters(mut self, parameters: serde_json::Value) -> Self {
+        self.parameters = parameters;
+        self
+    }
+
+    pub fn build(self) -> ToolFunction {
+        ToolFunction {
+            description: self.description,
+            name: self.name,
+            parameters: self.parameters,
+        }
     }
 }
 
