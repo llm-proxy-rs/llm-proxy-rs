@@ -46,7 +46,8 @@ pub struct ToolCall {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
     #[serde(rename = "type")]
-    pub tool_type: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_type: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub function: Option<Function>,
     pub index: i32,
@@ -203,7 +204,7 @@ fn tool_use_block_delta_to_tool_call(
 ) -> ToolCall {
     ToolCall {
         id: None,
-        tool_type: "function".to_string(),
+        tool_type: None,
         function: Some(Function {
             name: None,
             arguments: Some(tool_use_block_delta.input.clone()),
@@ -218,7 +219,7 @@ fn tool_use_block_start_to_tool_call(
 ) -> ToolCall {
     ToolCall {
         id: Some(tool_use_block_start.tool_use_id().to_string()),
-        tool_type: "function".to_string(),
+        tool_type: Some("function".to_string()),
         function: Some(Function {
             name: Some(tool_use_block_start.name().to_string()),
             arguments: Some("".to_string()),
