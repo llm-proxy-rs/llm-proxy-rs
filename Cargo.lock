@@ -730,6 +730,12 @@ dependencies = [
 [[package]]
 name = "client"
 version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "request",
+ "response",
+ "serde_json",
+]
 
 [[package]]
 name = "cmake"

@@ -4,4 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-
+anyhow = "1.0"
+response = { path = "../response" }
+request = { path = "../request" }
+serde_json = "1.0"
