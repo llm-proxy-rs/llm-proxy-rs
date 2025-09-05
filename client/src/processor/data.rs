@@ -45,4 +45,9 @@ impl DataProcessor {
         self.chat_completions_response_processor
             .get_assistant_message()
     }
+
+    pub fn get_request_tool_calls(&self) -> Result<Vec<request::tool::ToolCall>> {
+        self.chat_completions_response_processor
+            .get_request_tool_calls()
+    }
 }
