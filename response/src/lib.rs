@@ -31,7 +31,7 @@ pub struct Choice {
     pub logprobs: Option<String>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(untagged)]
 pub enum Delta {
     Content { content: String },
@@ -41,19 +41,19 @@ pub enum Delta {
     Empty {},
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ToolCall {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
     #[serde(rename = "type")]
-    pub tool_type: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_type: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub function: Option<Function>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub index: Option<i32>,
+    pub index: i32,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Function {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
@@ -204,12 +204,12 @@ fn tool_use_block_delta_to_tool_call(
 ) -> ToolCall {
     ToolCall {
         id: None,
-        tool_type: "function".to_string(),
+        tool_type: None,
         function: Some(Function {
             name: None,
             arguments: Some(tool_use_block_delta.input.clone()),
         }),
-        index: Some(index),
+        index,
     }
 }
 
@@ -219,12 +219,12 @@ fn tool_use_block_start_to_tool_call(
 ) -> ToolCall {
     ToolCall {
         id: Some(tool_use_block_start.tool_use_id().to_string()),
-        tool_type: "function".to_string(),
+        tool_type: Some("function".to_string()),
         function: Some(Function {
             name: Some(tool_use_block_start.name().to_string()),
             arguments: Some("".to_string()),
         }),
-        index: Some(index),
+        index,
     }
 }
 
