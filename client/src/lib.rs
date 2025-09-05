@@ -67,6 +67,12 @@ impl Client {
                 .send()
                 .await?;
 
+            if !response.status().is_success() {
+                let status = response.status();
+                let error_text = response.text().await?;
+                return Err(anyhow::anyhow!("HTTP error {}: {}", status, error_text));
+            }
+
             let mut response_processor = ResponseProcessor::new(self.chat_event_handler.clone());
             response_processor.process(response).await?;
 
@@ -126,33 +132,31 @@ impl Client {
 
                             results.push(ToolResult {
                                 tool_call_id: tool_call.id.clone(),
-                                content: format!("Error: {}", error_msg),
+                                content: format!("Error: {error_msg}"),
                             });
                         }
                     }
                 } else {
-                    let error_msg = format!("Tool '{}' not found", tool_name);
+                    let error_msg = format!("Tool '{tool_name}' not found");
 
                     self.chat_event_handler
                         .on_tool_error(tool_name, &error_msg)?;
 
                     results.push(ToolResult {
                         tool_call_id: tool_call.id.clone(),
-                        content: format!("Error: {}", error_msg),
+                        content: format!("Error: {error_msg}"),
                     });
                 }
             } else {
-                let error_msg = format!(
-                    "No tools are registered. Tool '{}' is not available.",
-                    tool_name
-                );
+                let error_msg =
+                    format!("No tools are registered. Tool '{tool_name}' is not available.");
 
                 self.chat_event_handler
                     .on_tool_error(tool_name, &error_msg)?;
 
                 results.push(ToolResult {
                     tool_call_id: tool_call.id.clone(),
-                    content: format!("Error: {}", error_msg),
+                    content: format!("Error: {error_msg}"),
                 });
             }
         }

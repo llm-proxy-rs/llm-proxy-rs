@@ -99,5 +99,11 @@ fn response_tool_calls_to_request_tool_calls(
         }
     }
 
+    for tool_call in &mut request_tool_calls {
+        if tool_call.function.arguments.is_empty() {
+            tool_call.function.arguments = "{}".to_string();
+        }
+    }
+
     Ok(request_tool_calls)
 }

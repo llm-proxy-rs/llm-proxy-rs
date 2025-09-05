@@ -20,24 +20,24 @@ pub struct DefaultChatEventHandler;
 
 impl ChatEventHandler for DefaultChatEventHandler {
     fn on_role(&self, role: &str) -> Result<()> {
-        print!("\n[{}]: ", role);
+        print!("\n[{role}]: ");
         io::stdout().flush()?;
         Ok(())
     }
 
     fn on_content(&self, content: &str) -> Result<()> {
-        print!("{}", content);
+        print!("{content}");
         io::stdout().flush()?;
         Ok(())
     }
 
     fn on_reasoning(&self, reasoning_content: &str) -> Result<()> {
-        println!("\n[Reasoning]: {}", reasoning_content);
+        println!("\n[Reasoning]: {reasoning_content}");
         Ok(())
     }
 
     fn on_finish(&self, finish_reason: &str) -> Result<()> {
-        println!("\n[Finished]: {}", finish_reason);
+        println!("\n[Finished]: {finish_reason}");
         Ok(())
     }
 
@@ -48,30 +48,29 @@ impl ChatEventHandler for DefaultChatEventHandler {
         total_tokens: i32,
     ) -> Result<()> {
         println!(
-            "\n[Usage] Prompt: {}, Completion: {}, Total: {}",
-            prompt_tokens, completion_tokens, total_tokens
+            "\n[Usage] Prompt: {prompt_tokens}, Completion: {completion_tokens}, Total: {total_tokens}"
         );
         Ok(())
     }
 
     fn on_tool_start(&self, tool_count: usize) -> Result<()> {
-        println!("\n[Executing {} tool(s)...]", tool_count);
+        println!("\n[Executing {tool_count} tool(s)...]");
         Ok(())
     }
 
     fn on_tool_call(&self, name: &str, args: &str) -> Result<()> {
-        println!("[Tool Call]: {}", name);
-        println!("{}", args);
+        println!("[Tool Call]: {name}");
+        println!("{args}");
         Ok(())
     }
 
     fn on_tool_result(&self, name: &str, result: &str) -> Result<()> {
-        println!("[Tool Result] {}: {}", name, result);
+        println!("[Tool Result] {name}: {result}");
         Ok(())
     }
 
     fn on_tool_error(&self, name: &str, error: &str) -> Result<()> {
-        println!("[Tool Error] {}: {}", name, error);
+        println!("[Tool Error] {name}: {error}");
         Ok(())
     }
 
