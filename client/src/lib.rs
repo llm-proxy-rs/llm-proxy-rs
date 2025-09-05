@@ -3,7 +3,9 @@ pub mod event;
 pub mod processor;
 pub mod tool;
 
-pub use processor::{ChatCompletionsResponseProcessor, DeltaProcessor, Processor};
+pub use processor::{
+    ChatCompletionsResponseProcessor, DeltaProcessor, Processor, ResponseProcessor,
+};
 pub use tool::Tool;
 
 use anyhow::Result;
@@ -22,13 +24,14 @@ impl Client {
     }
 
     pub async fn send(&self) -> Result<reqwest::Response> {
-        let request = self.get_chat_completions_request()?;
+        let chat_completions_request = self.get_chat_completions_request()?;
+        let url = format!("{}/chat/completions", self.config.base_url);
 
         let client = reqwest::Client::new();
         let response = client
-            .post(&self.config.base_url)
+            .post(&url)
             .header("Content-Type", "application/json")
-            .json(&request)
+            .json(&chat_completions_request)
             .send()
             .await?;
 

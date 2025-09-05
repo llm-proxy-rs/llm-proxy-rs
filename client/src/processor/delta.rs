@@ -12,6 +12,7 @@ pub struct DeltaProcessor {
     response_tool_calls: Vec<ResponseToolCall>,
 }
 
+#[async_trait::async_trait]
 impl Processor<Arc<dyn ChatEventHandler>, Delta> for DeltaProcessor {
     fn new(chat_event_handler: Arc<dyn ChatEventHandler>) -> Self {
         Self {
@@ -21,20 +22,20 @@ impl Processor<Arc<dyn ChatEventHandler>, Delta> for DeltaProcessor {
         }
     }
 
-    fn process(&mut self, delta: &Delta) -> Result<()> {
+    async fn process(&mut self, delta: Delta) -> Result<()> {
         match delta {
             Delta::Role { role } => {
-                self.chat_event_handler.on_role(role)?;
+                self.chat_event_handler.on_role(&role)?;
             }
             Delta::Content { content } => {
-                self.assistant_message_content.push_str(content);
-                self.chat_event_handler.on_content(content)?;
+                self.assistant_message_content.push_str(&content);
+                self.chat_event_handler.on_content(&content)?;
             }
             Delta::ToolCalls { tool_calls } => {
-                self.response_tool_calls.extend_from_slice(tool_calls);
+                self.response_tool_calls.extend_from_slice(&tool_calls);
             }
             Delta::Reasoning { reasoning_content } => {
-                self.chat_event_handler.on_reasoning(reasoning_content)?;
+                self.chat_event_handler.on_reasoning(&reasoning_content)?;
             }
             Delta::Empty {} => {}
         }

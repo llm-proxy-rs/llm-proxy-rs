@@ -10,6 +10,7 @@ pub struct ChatCompletionsResponseProcessor {
     delta_processor: DeltaProcessor,
 }
 
+#[async_trait::async_trait]
 impl Processor<Arc<dyn ChatEventHandler>, ChatCompletionsResponse>
     for ChatCompletionsResponseProcessor
 {
@@ -21,7 +22,7 @@ impl Processor<Arc<dyn ChatEventHandler>, ChatCompletionsResponse>
         }
     }
 
-    fn process(&mut self, chat_completions_response: &ChatCompletionsResponse) -> Result<()> {
+    async fn process(&mut self, chat_completions_response: ChatCompletionsResponse) -> Result<()> {
         if let Some(usage) = &chat_completions_response.usage {
             self.chat_event_handler.on_usage(
                 usage.prompt_tokens,
@@ -31,8 +32,8 @@ impl Processor<Arc<dyn ChatEventHandler>, ChatCompletionsResponse>
         }
 
         for choice in &chat_completions_response.choices {
-            if let Some(delta) = &choice.delta {
-                self.delta_processor.process(delta)?;
+            if let Some(delta) = choice.delta.clone() {
+                self.delta_processor.process(delta).await?;
             }
             if let Some(finish_reason) = &choice.finish_reason {
                 self.chat_event_handler.on_finish(finish_reason)?;
