@@ -17,5 +17,5 @@ impl From<ToolResult> for Message {
 
 pub trait Tool {
     fn definition(&self) -> RequestTool;
-    fn execute(&self, args: Option<&str>) -> Result<String>;
+    fn execute(&self, args: &str) -> Result<String>;
 }

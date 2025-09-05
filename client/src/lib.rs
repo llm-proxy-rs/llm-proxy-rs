@@ -76,16 +76,16 @@ impl Client {
             let assistant_message =
                 Message::assistant(&assistant_message_content, request_tool_calls.clone());
 
+            self.messages.push(assistant_message);
+
             let Some(ref tool_calls) = request_tool_calls else {
-                self.messages.push(assistant_message);
                 return Ok(());
             };
 
             self.chat_event_handler.on_tool_start(tool_calls.len())?;
 
-            let tool_results = self.execute_tool_calls(tool_calls).await?;
+            let tool_results = self.handle_tool_calls(tool_calls).await?;
 
-            self.messages.push(assistant_message.clone());
             for result in tool_results {
                 self.messages.push(result.into());
             }
@@ -94,7 +94,7 @@ impl Client {
         }
     }
 
-    pub async fn execute_tool_calls(
+    pub async fn handle_tool_calls(
         &self,
         tool_calls: &[RequestToolCall],
     ) -> Result<Vec<ToolResult>> {
@@ -104,12 +104,11 @@ impl Client {
             let tool_name = &tool_call.function.name;
             let tool_args = &tool_call.function.arguments;
 
-            self.chat_event_handler
-                .on_tool_call(tool_name, Some(tool_args))?;
+            self.chat_event_handler.on_tool_call(tool_name, tool_args)?;
 
             if let Some(ref tools) = self.tools {
                 if let Some(tool) = tools.get(tool_name) {
-                    match tool.execute(Some(tool_args)) {
+                    match tool.execute(tool_args) {
                         Ok(result_content) => {
                             self.chat_event_handler
                                 .on_tool_result(tool_name, &result_content)?;
@@ -143,10 +142,13 @@ impl Client {
                     });
                 }
             } else {
-                let error_msg = "No tools registered";
+                let error_msg = format!(
+                    "No tools are registered. Tool '{}' is not available.",
+                    tool_name
+                );
 
                 self.chat_event_handler
-                    .on_tool_error(tool_name, error_msg)?;
+                    .on_tool_error(tool_name, &error_msg)?;
 
                 results.push(ToolResult {
                     tool_call_id: tool_call.id.clone(),

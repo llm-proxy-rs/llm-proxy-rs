@@ -9,7 +9,7 @@ pub trait ChatEventHandler: Send + Sync {
     -> Result<()>;
     fn on_finish(&self, finish_reason: &str) -> Result<()>;
     fn on_tool_start(&self, tool_count: usize) -> Result<()>;
-    fn on_tool_call(&self, name: &str, args: Option<&str>) -> Result<()>;
+    fn on_tool_call(&self, name: &str, args: &str) -> Result<()>;
     fn on_tool_result(&self, name: &str, result: &str) -> Result<()>;
     fn on_tool_error(&self, name: &str, error: &str) -> Result<()>;
     fn on_continuation(&self) -> Result<()>;
@@ -59,11 +59,9 @@ impl ChatEventHandler for DefaultChatEventHandler {
         Ok(())
     }
 
-    fn on_tool_call(&self, name: &str, args: Option<&str>) -> Result<()> {
+    fn on_tool_call(&self, name: &str, args: &str) -> Result<()> {
         println!("[Tool Call]: {}", name);
-        if let Some(args) = args {
-            println!("{}", args);
-        }
+        println!("{}", args);
         Ok(())
     }
 
