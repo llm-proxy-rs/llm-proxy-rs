@@ -9,7 +9,7 @@ use crate::event::ChatEventHandler;
 pub struct DeltaProcessor {
     chat_event_handler: Arc<dyn ChatEventHandler>,
     assistant_message_content: String,
-    response_tool_calls: Vec<ResponseToolCall>,
+    response_tool_calls: Option<Vec<ResponseToolCall>>,
 }
 
 #[async_trait::async_trait]
@@ -18,7 +18,7 @@ impl Processor<Arc<dyn ChatEventHandler>, Delta> for DeltaProcessor {
         Self {
             chat_event_handler,
             assistant_message_content: String::new(),
-            response_tool_calls: Vec::new(),
+            response_tool_calls: None,
         }
     }
 
@@ -32,7 +32,13 @@ impl Processor<Arc<dyn ChatEventHandler>, Delta> for DeltaProcessor {
                 self.chat_event_handler.on_content(&content)?;
             }
             Delta::ToolCalls { tool_calls } => {
-                self.response_tool_calls.extend_from_slice(&tool_calls);
+                if !tool_calls.is_empty() {
+                    if let Some(ref mut existing_calls) = self.response_tool_calls {
+                        existing_calls.extend_from_slice(&tool_calls);
+                    } else {
+                        self.response_tool_calls = Some(tool_calls);
+                    }
+                }
             }
             Delta::Reasoning { reasoning_content } => {
                 self.chat_event_handler.on_reasoning(&reasoning_content)?;
@@ -44,12 +50,16 @@ impl Processor<Arc<dyn ChatEventHandler>, Delta> for DeltaProcessor {
 }
 
 impl DeltaProcessor {
-    pub fn get_assistant_message(&self) -> String {
+    pub fn get_assistant_message_content(&self) -> String {
         self.assistant_message_content.clone()
     }
 
-    pub fn get_request_tool_calls(&self) -> Result<Vec<RequestToolCall>> {
-        response_tool_calls_to_request_tool_calls(&self.response_tool_calls)
+    pub fn get_request_tool_calls(&self) -> Result<Option<Vec<RequestToolCall>>> {
+        self.response_tool_calls
+            .as_ref()
+            .map(|tool_calls| response_tool_calls_to_request_tool_calls(tool_calls))
+            .transpose()
+            .map(|opt| opt.filter(|calls| !calls.is_empty()))
     }
 }
 

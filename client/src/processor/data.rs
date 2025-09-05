@@ -41,12 +41,12 @@ impl Processor<Arc<dyn ChatEventHandler>, String, bool> for DataProcessor {
 }
 
 impl DataProcessor {
-    pub fn get_assistant_message(&self) -> String {
+    pub fn get_assistant_message_content(&self) -> String {
         self.chat_completions_response_processor
-            .get_assistant_message()
+            .get_assistant_message_content()
     }
 
-    pub fn get_request_tool_calls(&self) -> Result<Vec<request::tool::ToolCall>> {
+    pub fn get_request_tool_calls(&self) -> Result<Option<Vec<request::tool::ToolCall>>> {
         self.chat_completions_response_processor
             .get_request_tool_calls()
     }

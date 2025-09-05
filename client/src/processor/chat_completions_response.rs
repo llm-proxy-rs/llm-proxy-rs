@@ -44,11 +44,11 @@ impl Processor<Arc<dyn ChatEventHandler>, ChatCompletionsResponse>
 }
 
 impl ChatCompletionsResponseProcessor {
-    pub fn get_assistant_message(&self) -> String {
-        self.delta_processor.get_assistant_message()
+    pub fn get_assistant_message_content(&self) -> String {
+        self.delta_processor.get_assistant_message_content()
     }
 
-    pub fn get_request_tool_calls(&self) -> Result<Vec<request::tool::ToolCall>> {
+    pub fn get_request_tool_calls(&self) -> Result<Option<Vec<request::tool::ToolCall>>> {
         self.delta_processor.get_request_tool_calls()
     }
 }

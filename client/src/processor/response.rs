@@ -29,11 +29,11 @@ impl Processor<Arc<dyn ChatEventHandler>, reqwest::Response> for ResponseProcess
 }
 
 impl ResponseProcessor {
-    pub fn get_assistant_message(&self) -> String {
-        self.data_processor.get_assistant_message()
+    pub fn get_assistant_message_content(&self) -> String {
+        self.data_processor.get_assistant_message_content()
     }
 
-    pub fn get_request_tool_calls(&self) -> anyhow::Result<Vec<request::tool::ToolCall>> {
+    pub fn get_request_tool_calls(&self) -> anyhow::Result<Option<Vec<request::tool::ToolCall>>> {
         self.data_processor.get_request_tool_calls()
     }
 }
