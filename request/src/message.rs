@@ -8,7 +8,7 @@ use crate::{
     tool::ToolCall,
 };
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(tag = "role", rename_all = "lowercase")]
 pub enum Message {
     System {

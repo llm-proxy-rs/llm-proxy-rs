@@ -2,6 +2,7 @@ pub struct Config {
     pub client: ClientConfig,
 }
 
+#[derive(Default)]
 pub struct ClientConfig {
     pub base_url: String,
     pub max_tokens: Option<i32>,

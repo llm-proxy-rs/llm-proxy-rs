@@ -33,14 +33,14 @@ impl From<&ImageUrl> for Option<ImageBlock> {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(untagged)]
 pub enum Contents {
     Array(Vec<Content>),
     String(String),
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(tag = "type")]
 pub enum Content {
     #[serde(rename = "text")]
@@ -49,19 +49,19 @@ pub enum Content {
     ImageUrl { image_url: ImageUrl },
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ImageUrl {
     pub url: String,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(untagged)]
 pub enum SystemContents {
     Array(Vec<SystemContent>),
     String(String),
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(tag = "type")]
 pub enum SystemContent {
     #[serde(rename = "text")]
