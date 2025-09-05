@@ -43,6 +43,12 @@ impl Processor<Arc<dyn ChatEventHandler>, Delta> for DeltaProcessor {
     }
 }
 
+impl DeltaProcessor {
+    pub fn get_assistant_message(&self) -> String {
+        self.assistant_message_content.clone()
+    }
+}
+
 fn response_tool_calls_to_request_tool_calls(
     response_tool_calls: &[ResponseToolCall],
 ) -> Result<Vec<RequestToolCall>> {

@@ -42,3 +42,9 @@ impl Processor<Arc<dyn ChatEventHandler>, ChatCompletionsResponse>
         Ok(())
     }
 }
+
+impl ChatCompletionsResponseProcessor {
+    pub fn get_assistant_message(&self) -> String {
+        self.delta_processor.get_assistant_message()
+    }
+}

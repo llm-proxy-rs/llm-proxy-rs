@@ -18,13 +18,18 @@ impl Processor<Arc<dyn ChatEventHandler>, reqwest::Response> for ResponseProcess
 
     async fn process(&mut self, response: reqwest::Response) -> Result<()> {
         let mut stream = response.bytes_stream();
-        while let Some(chunk_result) = stream.next().await {
-            let chunk_bytes = chunk_result?;
-            let chunk_string = String::from_utf8_lossy(&chunk_bytes).to_string();
-            if self.data_processor.process(chunk_string).await? {
+        while let Some(chunk) = stream.next().await {
+            let chunk = String::from_utf8_lossy(&chunk?).to_string();
+            if self.data_processor.process(chunk).await? {
                 break;
             }
         }
         Ok(())
+    }
+}
+
+impl ResponseProcessor {
+    pub fn get_assistant_message(&self) -> String {
+        self.data_processor.get_assistant_message()
     }
 }

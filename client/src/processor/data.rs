@@ -39,3 +39,10 @@ impl Processor<Arc<dyn ChatEventHandler>, String, bool> for DataProcessor {
         Ok(false)
     }
 }
+
+impl DataProcessor {
+    pub fn get_assistant_message(&self) -> String {
+        self.chat_completions_response_processor
+            .get_assistant_message()
+    }
+}
