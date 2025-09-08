@@ -32,11 +32,6 @@ impl Client {
         }
     }
 
-    pub fn config(mut self, config: config::ClientConfig) -> Self {
-        self.config = config;
-        self
-    }
-
     pub fn message(mut self, message: Message) -> Self {
         self.messages.push(message);
         self
@@ -88,7 +83,9 @@ impl Client {
                 return Ok(());
             };
 
-            self.chat_event_handler.on_tool_start(tool_calls.len())?;
+            self.chat_event_handler
+                .on_tool_start(tool_calls.len())
+                .await?;
 
             let tool_results = self.handle_tool_calls(tool_calls).await?;
 
@@ -96,7 +93,7 @@ impl Client {
                 self.messages.push(result.into());
             }
 
-            self.chat_event_handler.on_continuation()?;
+            self.chat_event_handler.on_continuation().await?;
         }
     }
 
@@ -110,14 +107,17 @@ impl Client {
             let tool_name = &tool_call.function.name;
             let tool_args = &tool_call.function.arguments;
 
-            self.chat_event_handler.on_tool_call(tool_name, tool_args)?;
+            self.chat_event_handler
+                .on_tool_call(tool_name, tool_args)
+                .await?;
 
             if let Some(ref tools) = self.tools {
                 if let Some(tool) = tools.get(tool_name) {
                     match tool.execute(tool_args) {
                         Ok(result_content) => {
                             self.chat_event_handler
-                                .on_tool_result(tool_name, &result_content)?;
+                                .on_tool_result(tool_name, &result_content)
+                                .await?;
 
                             results.push(ToolResult {
                                 tool_call_id: tool_call.id.clone(),
@@ -128,7 +128,8 @@ impl Client {
                             let error_msg = error.to_string();
 
                             self.chat_event_handler
-                                .on_tool_error(tool_name, &error_msg)?;
+                                .on_tool_error(tool_name, &error_msg)
+                                .await?;
 
                             results.push(ToolResult {
                                 tool_call_id: tool_call.id.clone(),
@@ -140,7 +141,8 @@ impl Client {
                     let error_msg = format!("Tool '{tool_name}' not found");
 
                     self.chat_event_handler
-                        .on_tool_error(tool_name, &error_msg)?;
+                        .on_tool_error(tool_name, &error_msg)
+                        .await?;
 
                     results.push(ToolResult {
                         tool_call_id: tool_call.id.clone(),
@@ -152,7 +154,8 @@ impl Client {
                     format!("No tools are registered. Tool '{tool_name}' is not available.");
 
                 self.chat_event_handler
-                    .on_tool_error(tool_name, &error_msg)?;
+                    .on_tool_error(tool_name, &error_msg)
+                    .await?;
 
                 results.push(ToolResult {
                     tool_call_id: tool_call.id.clone(),

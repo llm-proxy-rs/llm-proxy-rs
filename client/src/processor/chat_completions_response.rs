@@ -24,11 +24,13 @@ impl Processor<Arc<dyn ChatEventHandler>, ChatCompletionsResponse>
 
     async fn process(&mut self, chat_completions_response: ChatCompletionsResponse) -> Result<()> {
         if let Some(usage) = &chat_completions_response.usage {
-            self.chat_event_handler.on_usage(
-                usage.prompt_tokens,
-                usage.completion_tokens,
-                usage.total_tokens,
-            )?;
+            self.chat_event_handler
+                .on_usage(
+                    usage.prompt_tokens,
+                    usage.completion_tokens,
+                    usage.total_tokens,
+                )
+                .await?;
         }
 
         for choice in &chat_completions_response.choices {
@@ -36,7 +38,7 @@ impl Processor<Arc<dyn ChatEventHandler>, ChatCompletionsResponse>
                 self.delta_processor.process(delta).await?;
             }
             if let Some(finish_reason) = &choice.finish_reason {
-                self.chat_event_handler.on_finish(finish_reason)?;
+                self.chat_event_handler.on_finish(finish_reason).await?;
             }
         }
         Ok(())

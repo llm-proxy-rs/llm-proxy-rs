@@ -39,7 +39,7 @@ pub struct ToolChoiceFunction {
     pub name: String,
 }
 
-#[derive(Debug, Default, Clone, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct ToolCall {
     pub id: String,
     #[serde(rename = "type")]
@@ -47,7 +47,7 @@ pub struct ToolCall {
     pub function: FunctionCall,
 }
 
-#[derive(Debug, Default, Clone, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct FunctionCall {
     pub name: String,
     pub arguments: String,
@@ -85,7 +85,7 @@ impl TryFrom<&Message> for ToolResultBlock {
         };
 
         Ok(ToolResultBlock::builder()
-            .set_tool_use_id(Some(tool_call_id.clone()))
+            .tool_use_id(tool_call_id)
             .set_content(Some(contents.into()))
             .build()?)
     }

@@ -25,11 +25,11 @@ impl Processor<Arc<dyn ChatEventHandler>, Delta> for DeltaProcessor {
     async fn process(&mut self, delta: Delta) -> Result<()> {
         match delta {
             Delta::Role { role } => {
-                self.chat_event_handler.on_role(&role)?;
+                self.chat_event_handler.on_role(&role).await?;
             }
             Delta::Content { content } => {
                 self.assistant_message_content.push_str(&content);
-                self.chat_event_handler.on_content(&content)?;
+                self.chat_event_handler.on_content(&content).await?;
             }
             Delta::ToolCalls { tool_calls } => {
                 if !tool_calls.is_empty() {
@@ -41,7 +41,9 @@ impl Processor<Arc<dyn ChatEventHandler>, Delta> for DeltaProcessor {
                 }
             }
             Delta::Reasoning { reasoning_content } => {
-                self.chat_event_handler.on_reasoning(&reasoning_content)?;
+                self.chat_event_handler
+                    .on_reasoning(&reasoning_content)
+                    .await?;
             }
             Delta::Empty {} => {}
         }
