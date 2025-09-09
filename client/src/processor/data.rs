@@ -1,13 +1,14 @@
 use anyhow::Result;
 use response::ChatCompletionsResponse;
-use serde_json;
 use std::sync::Arc;
+use tracing::info;
 
 use super::{ChatCompletionsResponseProcessor, Processor};
 use crate::event::ChatEventHandler;
 
 pub struct DataProcessor {
     chat_completions_response_processor: ChatCompletionsResponseProcessor,
+    data_buffer: String,
 }
 
 #[async_trait::async_trait]
@@ -17,14 +18,24 @@ impl Processor<Arc<dyn ChatEventHandler>, String, bool> for DataProcessor {
             ChatCompletionsResponseProcessor::new(chat_event_handler);
         Self {
             chat_completions_response_processor,
+            data_buffer: String::new(),
         }
     }
 
     async fn process(&mut self, data: String) -> Result<bool> {
-        for line in data.lines() {
+        self.data_buffer.push_str(&data);
+
+        while let Some(newline_pos) = self.data_buffer.find('\n') {
+            let line = self.data_buffer.drain(..=newline_pos).collect::<String>();
+            let line = line.trim_end();
+
             if let Some(json_payload) = line.strip_prefix("data: ") {
                 if json_payload == "[DONE]" {
                     return Ok(true);
+                }
+
+                if json_payload.contains("tool_calls") {
+                    info!("SSE event: {}", json_payload);
                 }
 
                 if let Ok(chat_completions_response) =
@@ -41,7 +52,7 @@ impl Processor<Arc<dyn ChatEventHandler>, String, bool> for DataProcessor {
 }
 
 impl DataProcessor {
-    pub fn get_assistant_message_content(&self) -> String {
+    pub fn get_assistant_message_content(&self) -> Option<String> {
         self.chat_completions_response_processor
             .get_assistant_message_content()
     }

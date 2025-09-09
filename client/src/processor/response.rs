@@ -29,7 +29,7 @@ impl Processor<Arc<dyn ChatEventHandler>, reqwest::Response> for ResponseProcess
 }
 
 impl ResponseProcessor {
-    pub fn get_assistant_message_content(&self) -> String {
+    pub fn get_assistant_message_content(&self) -> Option<String> {
         self.data_processor.get_assistant_message_content()
     }
 

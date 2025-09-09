@@ -8,7 +8,7 @@ use crate::event::ChatEventHandler;
 
 pub struct DeltaProcessor {
     chat_event_handler: Arc<dyn ChatEventHandler>,
-    assistant_message_content: String,
+    assistant_message_content: Option<String>,
     response_tool_calls: Option<Vec<ResponseToolCall>>,
 }
 
@@ -17,7 +17,7 @@ impl Processor<Arc<dyn ChatEventHandler>, Delta> for DeltaProcessor {
     fn new(chat_event_handler: Arc<dyn ChatEventHandler>) -> Self {
         Self {
             chat_event_handler,
-            assistant_message_content: String::new(),
+            assistant_message_content: None,
             response_tool_calls: None,
         }
     }
@@ -28,8 +28,15 @@ impl Processor<Arc<dyn ChatEventHandler>, Delta> for DeltaProcessor {
                 self.chat_event_handler.on_role(&role).await?;
             }
             Delta::Content { content } => {
-                self.assistant_message_content.push_str(&content);
-                self.chat_event_handler.on_content(&content).await?;
+                if !content.is_empty() {
+                    if let Some(ref mut assistant_message_content) = self.assistant_message_content
+                    {
+                        assistant_message_content.push_str(&content);
+                    } else {
+                        self.assistant_message_content = Some(content.clone());
+                    }
+                    self.chat_event_handler.on_content(&content).await?;
+                }
             }
             Delta::ToolCalls { tool_calls } => {
                 if !tool_calls.is_empty() {
@@ -52,7 +59,7 @@ impl Processor<Arc<dyn ChatEventHandler>, Delta> for DeltaProcessor {
 }
 
 impl DeltaProcessor {
-    pub fn get_assistant_message_content(&self) -> String {
+    pub fn get_assistant_message_content(&self) -> Option<String> {
         self.assistant_message_content.clone()
     }
 

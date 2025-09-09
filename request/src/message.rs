@@ -48,9 +48,9 @@ impl Message {
         }
     }
 
-    pub fn assistant(content: &str, tool_calls: Option<Vec<ToolCall>>) -> Self {
+    pub fn assistant(content: Option<String>, tool_calls: Option<Vec<ToolCall>>) -> Self {
         Message::Assistant {
-            contents: Some(Contents::String(content.to_string())),
+            contents: content.map(Contents::String),
             tool_calls,
         }
     }

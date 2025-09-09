@@ -15,7 +15,8 @@ impl From<ToolResult> for Message {
     }
 }
 
+#[async_trait::async_trait]
 pub trait Tool {
     fn definition(&self) -> RequestTool;
-    fn execute(&self, args: &str) -> Result<String>;
+    async fn execute(&self, args: &str) -> Result<String>;
 }

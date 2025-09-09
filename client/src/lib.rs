@@ -5,12 +5,12 @@ pub mod tool;
 
 use anyhow::Result;
 pub use event::{ChatEventHandler, DefaultChatEventHandler};
-pub use processor::{
-    ChatCompletionsResponseProcessor, DeltaProcessor, Processor, ResponseProcessor,
-};
 use request::{ChatCompletionsRequest, Message, StreamOptions, tool::ToolCall as RequestToolCall};
 use std::{collections::HashMap, sync::Arc};
 pub use tool::{Tool, ToolResult};
+use tracing::info;
+
+use crate::processor::{Processor, ResponseProcessor};
 
 pub struct Client {
     pub config: config::ClientConfig,
@@ -54,6 +54,10 @@ impl Client {
             let chat_completions_request = self.get_chat_completions_request()?;
             let url = format!("{}/chat/completions", self.config.base_url);
 
+            for (i, message) in chat_completions_request.messages.iter().enumerate() {
+                info!("Message {}: {:?}", i, message);
+            }
+
             let client = reqwest::Client::new();
             let response = client
                 .post(&url)
@@ -74,10 +78,11 @@ impl Client {
             let assistant_message_content = response_processor.get_assistant_message_content();
             let request_tool_calls = response_processor.get_request_tool_calls()?;
 
-            let assistant_message =
-                Message::assistant(&assistant_message_content, request_tool_calls.clone());
-
-            self.messages.push(assistant_message);
+            if assistant_message_content.is_some() || request_tool_calls.is_some() {
+                let assistant_message =
+                    Message::assistant(assistant_message_content, request_tool_calls.clone());
+                self.messages.push(assistant_message);
+            }
 
             let Some(ref tool_calls) = request_tool_calls else {
                 return Ok(());
@@ -113,7 +118,7 @@ impl Client {
 
             if let Some(ref tools) = self.tools {
                 if let Some(tool) = tools.get(tool_name) {
-                    match tool.execute(tool_args) {
+                    match tool.execute(tool_args).await {
                         Ok(result_content) => {
                             self.chat_event_handler
                                 .on_tool_result(tool_name, &result_content)
