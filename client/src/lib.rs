@@ -15,7 +15,7 @@ use crate::processor::{Processor, ResponseProcessor};
 pub struct Client {
     pub config: config::ClientConfig,
     pub messages: Vec<Message>,
-    pub tools: Option<HashMap<String, Box<dyn Tool>>>,
+    pub tools: Option<HashMap<String, Arc<dyn Tool>>>,
     pub chat_event_handler: Arc<dyn ChatEventHandler>,
 }
 
@@ -32,12 +32,12 @@ impl Client {
         }
     }
 
-    pub fn message(mut self, message: Message) -> Self {
+    pub fn message(&mut self, message: Message) -> &mut Self {
         self.messages.push(message);
         self
     }
 
-    pub fn tool(mut self, tool: Box<dyn Tool>) -> Self {
+    pub fn tool(&mut self, tool: Arc<dyn Tool>) -> &mut Self {
         let name = tool.definition().function.name.clone();
         if let Some(ref mut tools) = self.tools {
             tools.insert(name, tool);

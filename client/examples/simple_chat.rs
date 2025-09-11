@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 pub struct TimeTool;
 
+#[async_trait::async_trait]
 impl Tool for TimeTool {
     fn definition(&self) -> RequestTool {
         RequestTool::builder()
@@ -24,7 +25,7 @@ impl Tool for TimeTool {
             .build()
     }
 
-    fn execute(&self, _args: &str) -> Result<String> {
+    async fn execute(&self, _args: &str) -> Result<String> {
         Ok(chrono::Utc::now()
             .format("%Y-%m-%d %H:%M:%S UTC")
             .to_string())
@@ -42,12 +43,12 @@ async fn main() -> Result<()> {
             top_p: None,
         },
         Arc::new(DefaultChatEventHandler),
-    )
-    .tool(Box::new(TimeTool));
+    );
+    client.tool(Arc::new(TimeTool));
 
     println!("Sending request to LLM proxy...");
 
-    client = client
+    client
         .message(Message::system(
             "You are a helpful assistant that can tell time.",
         ))
@@ -57,7 +58,7 @@ async fn main() -> Result<()> {
 
     client.send().await?;
 
-    client = client.message(Message::user("Can you tell me the time again?"));
+    client.message(Message::user("Can you tell me the time again?"));
 
     client.send().await?;
 
