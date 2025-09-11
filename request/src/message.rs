@@ -3,9 +3,12 @@ use aws_sdk_bedrockruntime::types::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::content::{Contents, SystemContents};
+use crate::{
+    content::{Contents, SystemContents},
+    tool::ToolCall,
+};
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(tag = "role", rename_all = "lowercase")]
 pub enum Message {
     System {
@@ -23,24 +26,34 @@ pub enum Message {
         #[serde(skip_serializing_if = "Option::is_none")]
         contents: Option<Contents>,
         #[serde(skip_serializing_if = "Option::is_none")]
-        tool_calls: Option<Vec<crate::ToolCall>>,
+        tool_calls: Option<Vec<ToolCall>>,
     },
     Tool {
         #[serde(rename = "content")]
-        #[serde(skip_serializing_if = "Option::is_none")]
-        contents: Option<Contents>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        tool_call_id: Option<String>,
+        contents: Contents,
+        tool_call_id: String,
     },
 }
 
-#[derive(Debug, Deserialize, Serialize, PartialEq)]
-#[serde(rename_all = "lowercase")]
-pub enum Role {
-    Assistant,
-    System,
-    User,
-    Tool,
+impl Message {
+    pub fn system(content: &str) -> Self {
+        Message::System {
+            contents: Some(SystemContents::String(content.to_string())),
+        }
+    }
+
+    pub fn user(content: &str) -> Self {
+        Message::User {
+            contents: Some(Contents::String(content.to_string())),
+        }
+    }
+
+    pub fn assistant(content: Option<String>, tool_calls: Option<Vec<ToolCall>>) -> Self {
+        Message::Assistant {
+            contents: content.map(Contents::String),
+            tool_calls,
+        }
+    }
 }
 
 impl TryFrom<&Message> for Option<Vec<ContentBlock>> {
