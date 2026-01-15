@@ -1,5 +1,4 @@
 pub mod bedrock;
-pub mod openai;
 pub mod providers;
 
 use axum::response::sse::Event;
