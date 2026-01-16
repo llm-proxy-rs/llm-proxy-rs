@@ -70,7 +70,7 @@ async fn main() -> anyhow::Result<()> {
     let (host, port) = load_config().await?;
     info!("Starting server on {}:{}", host, port);
 
-    let app = Router::new().route("/v1/messages", post(chat_completions));
+    let app = Router::new().route("/chat/completions", post(chat_completions));
 
     info!("Routes configured, binding to {}:{}", host, port);
     let listener = tokio::net::TcpListener::bind(format!("{host}:{port}")).await?;
