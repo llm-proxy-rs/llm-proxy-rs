@@ -110,9 +110,16 @@ impl TryFrom<&Tool> for BedrockTool {
     type Error = anyhow::Error;
 
     fn try_from(tool: &Tool) -> Result<Self, Self::Error> {
+        let description = tool
+            .function
+            .description
+            .as_ref()
+            .filter(|d| !d.trim().is_empty())
+            .cloned();
+
         let tool_spec = ToolSpecification::builder()
             .name(&tool.function.name)
-            .set_description(tool.function.description.clone())
+            .set_description(description)
             .input_schema(ToolInputSchema::Json(value_to_document(
                 &tool.function.parameters,
             )))
