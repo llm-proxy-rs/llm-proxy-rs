@@ -10,12 +10,13 @@ use async_trait::async_trait;
 use aws_config::BehaviorVersion;
 use aws_sdk_bedrockruntime::Client;
 use aws_sdk_bedrockruntime::primitives::event_stream::EventReceiver;
+use aws_sdk_bedrockruntime::types::TokenUsage;
 use aws_sdk_bedrockruntime::types::error::ConverseStreamOutputError;
 use axum::response::sse::Event;
 use chrono::offset::Utc;
 use futures::stream::{BoxStream, StreamExt};
 use request::ChatCompletionsRequest;
-use response::{Usage, converse_stream_output_to_chat_completions_response_builder};
+use response::converse_stream_output_to_chat_completions_response_builder;
 use std::sync::Arc;
 use tracing::info;
 use uuid::Uuid;
@@ -27,7 +28,7 @@ async fn process_bedrock_stream(
     >,
     id: String,
     created: i64,
-    usage_callback: Arc<dyn Fn(&Usage) + Send + Sync>,
+    usage_callback: Arc<dyn Fn(&TokenUsage) + Send + Sync>,
 ) -> BoxStream<'static, anyhow::Result<Event>> {
     let stream = async_stream::stream! {
         loop {
@@ -78,7 +79,7 @@ pub trait ChatCompletionsProvider {
         usage_callback: F,
     ) -> anyhow::Result<BoxStream<'async_trait, anyhow::Result<Event>>>
     where
-        F: Fn(&Usage) + Send + Sync + 'static;
+        F: Fn(&TokenUsage) + Send + Sync + 'static;
 }
 
 pub struct BedrockChatCompletionsProvider {}
@@ -98,7 +99,7 @@ impl ChatCompletionsProvider for BedrockChatCompletionsProvider {
         usage_callback: F,
     ) -> anyhow::Result<BoxStream<'async_trait, anyhow::Result<Event>>>
     where
-        F: Fn(&Usage) + Send + Sync + 'static,
+        F: Fn(&TokenUsage) + Send + Sync + 'static,
     {
         let bedrock_chat_completion = process_chat_completions_request_to_bedrock_chat_completion(
             &request,
@@ -128,8 +129,19 @@ impl ChatCompletionsProvider for BedrockChatCompletionsProvider {
                 bedrock_chat_completion.additional_model_request_fields,
             );
 
-        let stream = converse_builder.send().await?.stream;
-        info!("Successfully connected to Bedrock stream");
+        info!("About to send request to Bedrock...");
+        let result = converse_builder.send().await;
+
+        let stream = match result {
+            Ok(response) => {
+                info!("Successfully connected to Bedrock stream");
+                response.stream
+            }
+            Err(e) => {
+                tracing::error!("Bedrock API error: {:?}", e);
+                return Err(anyhow::anyhow!("Bedrock API error: {}", e));
+            }
+        };
 
         let id = Uuid::new_v4().to_string();
         let created = Utc::now().timestamp();

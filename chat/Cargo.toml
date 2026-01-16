@@ -5,12 +5,15 @@ edition = "2024"
 
 [dependencies]
 anyhow = "1.0.100"
+anthropic-request = { path = "../anthropic-request" }
+anthropic-response = { path = "../anthropic-response" }
 async-stream = "0.3.6"
 async-trait = "0.1.89"
 aws-config = "1.8.12"
 aws-sdk-bedrockruntime = "1.121.0"
 aws-smithy-types = "1.3.6"
 axum = "0.8.8"
+base64 = "0.22.1"
 chrono = "0.4.43"
 futures = "0.3.31"
 request = { path = "../request" }

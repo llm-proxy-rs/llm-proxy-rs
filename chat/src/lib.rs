@@ -1,4 +1,5 @@
 pub mod bedrock;
+pub mod converters;
 pub mod providers;
 
 use axum::response::sse::Event;

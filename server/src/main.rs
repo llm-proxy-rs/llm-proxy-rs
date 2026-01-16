@@ -1,68 +1,16 @@
-use axum::{
-    Json, Router,
-    extract::State,
-    http::StatusCode,
-    response::{IntoResponse, sse::Sse},
-    routing::post,
-};
-use chat::{
-    bedrock::ReasoningEffortToThinkingBudgetTokens,
-    providers::{BedrockChatCompletionsProvider, ChatCompletionsProvider},
-};
+use axum::{Router, routing::post};
+use chat::bedrock::ReasoningEffortToThinkingBudgetTokens;
 use config::{Config, File};
-use request::{ChatCompletionsRequest, StreamOptions};
-use response::Usage;
 use std::sync::Arc;
-use tracing::{debug, error, info};
+use tracing::info;
 
 mod error;
-
-use crate::error::AppError;
+mod handlers;
+mod utils;
 
 #[derive(Clone)]
-struct AppState {
-    reasoning_effort_to_thinking_budget_tokens: Arc<ReasoningEffortToThinkingBudgetTokens>,
-}
-
-async fn chat_completions(
-    State(state): State<Arc<AppState>>,
-    Json(mut payload): Json<ChatCompletionsRequest>,
-) -> Result<impl IntoResponse, AppError> {
-    debug!(
-        "Received chat completions request for model: {}",
-        payload.model
-    );
-
-    if payload.stream == Some(false) {
-        error!("Streaming is required but was disabled");
-        return Err(AppError::from(anyhow::anyhow!(
-            "Streaming is required but was disabled"
-        )));
-    }
-
-    payload.stream_options = Some(StreamOptions {
-        include_usage: true,
-    });
-
-    let usage_callback = |usage: &Usage| {
-        info!(
-            "Usage: prompt_tokens: {}, completion_tokens: {}, total_tokens: {}",
-            usage.prompt_tokens, usage.completion_tokens, usage.total_tokens
-        );
-    };
-
-    info!("Using Bedrock provider for model: {}", payload.model);
-
-    let stream = BedrockChatCompletionsProvider::new()
-        .await
-        .chat_completions_stream(
-            payload,
-            state.reasoning_effort_to_thinking_budget_tokens.clone(),
-            usage_callback,
-        )
-        .await?;
-
-    Ok((StatusCode::OK, Sse::new(stream)))
+pub struct AppState {
+    pub reasoning_effort_to_thinking_budget_tokens: Arc<ReasoningEffortToThinkingBudgetTokens>,
 }
 
 async fn load_config() -> anyhow::Result<(String, u16, ReasoningEffortToThinkingBudgetTokens)> {
@@ -105,7 +53,11 @@ async fn main() -> anyhow::Result<()> {
     });
 
     let app = Router::new()
-        .route("/chat/completions", post(chat_completions))
+        .route("/v1/messages", post(handlers::anthropic::v1_messages))
+        .route(
+            "/chat/completions",
+            post(handlers::openai::chat_completions),
+        )
         .with_state(state);
 
     info!("Routes configured, binding to {}:{}", host, port);

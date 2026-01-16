@@ -230,7 +230,7 @@ fn tool_use_block_start_to_tool_call(
 
 pub fn converse_stream_output_to_chat_completions_response_builder(
     output: &ConverseStreamOutput,
-    usage_callback: Arc<dyn Fn(&Usage)>,
+    usage_callback: Arc<dyn Fn(&aws_sdk_bedrockruntime::types::TokenUsage)>,
 ) -> Option<ChatCompletionsResponseBuilder> {
     let builder = ChatCompletionsResponse::builder();
 
@@ -315,15 +315,13 @@ pub fn converse_stream_output_to_chat_completions_response_builder(
         }
         ConverseStreamOutput::Metadata(event) => {
             let usage = event.usage.as_ref().map(|u| {
-                let usage = UsageBuilder::default()
+                usage_callback(u);
+
+                UsageBuilder::default()
                     .completion_tokens(u.output_tokens)
                     .prompt_tokens(u.input_tokens)
                     .total_tokens(u.total_tokens)
-                    .build();
-
-                usage_callback(&usage);
-
-                usage
+                    .build()
             });
 
             let choice = ChoiceBuilder::default().build();
