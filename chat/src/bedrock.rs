@@ -81,8 +81,8 @@ pub fn process_chat_completions_request_to_bedrock_chat_completion(
         .set_top_p(request.top_p)
         .build();
 
-    let additional_model_request_fields = request.reasoning_effort.as_ref().map(|effort| {
-        let budget_tokens = match effort.to_lowercase().as_str() {
+    let additional_model_request_fields = request.reasoning_effort.as_ref().map(|r| {
+        let budget_tokens = match r.to_lowercase().as_str() {
             "low" => reasoning_effort_to_thinking_budget_tokens.low,
             "medium" => reasoning_effort_to_thinking_budget_tokens.medium,
             "high" => reasoning_effort_to_thinking_budget_tokens.high,
