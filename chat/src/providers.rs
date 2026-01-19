@@ -1,6 +1,9 @@
 use crate::{
-    DONE_MESSAGE, ProcessChatCompletionsRequest,
-    bedrock::{BedrockChatCompletion, process_chat_completions_request_to_bedrock_chat_completion},
+    DONE_MESSAGE,
+    bedrock::{
+        ReasoningEffortToThinkingBudgetTokens,
+        process_chat_completions_request_to_bedrock_chat_completion,
+    },
     create_sse_event,
 };
 use async_trait::async_trait;
@@ -71,6 +74,7 @@ pub trait ChatCompletionsProvider {
     async fn chat_completions_stream<F>(
         self,
         request: ChatCompletionsRequest,
+        reasoning_effort_to_thinking_budget_tokens: Arc<ReasoningEffortToThinkingBudgetTokens>,
         usage_callback: F,
     ) -> anyhow::Result<BoxStream<'async_trait, anyhow::Result<Event>>>
     where
@@ -85,26 +89,21 @@ impl BedrockChatCompletionsProvider {
     }
 }
 
-impl ProcessChatCompletionsRequest<BedrockChatCompletion> for BedrockChatCompletionsProvider {
-    fn process_chat_completions_request(
-        &self,
-        request: &ChatCompletionsRequest,
-    ) -> anyhow::Result<BedrockChatCompletion> {
-        process_chat_completions_request_to_bedrock_chat_completion(request)
-    }
-}
-
 #[async_trait]
 impl ChatCompletionsProvider for BedrockChatCompletionsProvider {
     async fn chat_completions_stream<F>(
         self,
         request: ChatCompletionsRequest,
+        reasoning_effort_to_thinking_budget_tokens: Arc<ReasoningEffortToThinkingBudgetTokens>,
         usage_callback: F,
     ) -> anyhow::Result<BoxStream<'async_trait, anyhow::Result<Event>>>
     where
         F: Fn(&Usage) + Send + Sync + 'static,
     {
-        let bedrock_chat_completion = self.process_chat_completions_request(&request)?;
+        let bedrock_chat_completion = process_chat_completions_request_to_bedrock_chat_completion(
+            &request,
+            &reasoning_effort_to_thinking_budget_tokens,
+        )?;
         info!(
             "Processed request to Bedrock format with {} messages",
             bedrock_chat_completion.messages.len()
