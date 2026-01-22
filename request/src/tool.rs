@@ -12,7 +12,7 @@ use crate::{ChatCompletionsRequest, Content, Contents, Message};
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Tool {
     #[serde(rename = "type")]
-    pub tool_type: String,
+    pub tool_call_type: String,
     pub function: ToolFunction,
 }
 
@@ -28,7 +28,7 @@ pub struct ToolFunction {
 pub struct ToolCall {
     pub id: String,
     #[serde(rename = "type")]
-    pub tool_type: String,
+    pub tool_call_type: String,
     pub function: FunctionCall,
 }
 
