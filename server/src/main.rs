@@ -11,13 +11,14 @@ use chat::{
 };
 use config::{Config, File};
 use request::{ChatCompletionsRequest, StreamOptions};
-use response::Usage;
 use std::sync::Arc;
 use tracing::{debug, error, info};
 
 mod error;
+mod utils;
 
 use crate::error::AppError;
+use crate::utils::usage_callback;
 
 #[derive(Clone)]
 struct AppState {
@@ -43,13 +44,6 @@ async fn chat_completions(
     payload.stream_options = Some(StreamOptions {
         include_usage: true,
     });
-
-    let usage_callback = |usage: &Usage| {
-        info!(
-            "Usage: prompt_tokens: {}, completion_tokens: {}, total_tokens: {}",
-            usage.prompt_tokens, usage.completion_tokens, usage.total_tokens
-        );
-    };
 
     info!("Using Bedrock provider for model: {}", payload.model);
 
