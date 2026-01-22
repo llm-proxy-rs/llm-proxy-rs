@@ -128,8 +128,19 @@ impl ChatCompletionsProvider for BedrockChatCompletionsProvider {
                 bedrock_chat_completion.additional_model_request_fields,
             );
 
-        let stream = converse_builder.send().await?.stream;
-        info!("Successfully connected to Bedrock stream");
+        info!("About to send request to Bedrock...");
+        let result = converse_builder.send().await;
+
+        let stream = match result {
+            Ok(response) => {
+                info!("Successfully connected to Bedrock stream");
+                response.stream
+            }
+            Err(e) => {
+                tracing::error!("Bedrock API error: {:?}", e);
+                return Err(anyhow::anyhow!("Bedrock API error: {}", e));
+            }
+        };
 
         let id = Uuid::new_v4().to_string();
         let created = Utc::now().timestamp();

@@ -8,6 +8,7 @@ anyhow = "1.0.100"
 aws-sdk-bedrockruntime = "1.122.0"
 axum = "0.8.8"
 chat = { path = "../chat" }
+common = { path = "../common" }
 config = "0.15.19"
 request = { path = "../request" }
 response = { path = "../response" }
