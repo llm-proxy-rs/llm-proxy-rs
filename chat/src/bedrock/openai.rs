@@ -4,33 +4,8 @@ use aws_sdk_bedrockruntime::types::{
 };
 use aws_smithy_types::Document;
 use request::ChatCompletionsRequest;
-use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
-pub struct ReasoningEffortToThinkingBudgetTokens {
-    pub low: i32,
-    pub medium: i32,
-    pub high: i32,
-}
-
-impl Default for ReasoningEffortToThinkingBudgetTokens {
-    fn default() -> Self {
-        Self {
-            low: 1024,
-            medium: 2048,
-            high: 4096,
-        }
-    }
-}
-
-pub struct BedrockChatCompletion {
-    pub model_id: String,
-    pub messages: Vec<Message>,
-    pub system_content_blocks: Vec<SystemContentBlock>,
-    pub tool_config: Option<ToolConfiguration>,
-    pub inference_config: InferenceConfiguration,
-    pub additional_model_request_fields: Option<Document>,
-}
+use super::{BedrockChatCompletion, ReasoningEffortToThinkingBudgetTokens};
 
 pub fn process_chat_completions_request_to_bedrock_chat_completion(
     request: &ChatCompletionsRequest,
@@ -108,8 +83,16 @@ pub fn process_chat_completions_request_to_bedrock_chat_completion(
 
     Ok(BedrockChatCompletion {
         model_id: request.model.clone(),
-        messages,
-        system_content_blocks,
+        messages: if messages.is_empty() {
+            None
+        } else {
+            Some(messages)
+        },
+        system_content_blocks: if system_content_blocks.is_empty() {
+            None
+        } else {
+            Some(system_content_blocks)
+        },
         tool_config,
         inference_config,
         additional_model_request_fields,

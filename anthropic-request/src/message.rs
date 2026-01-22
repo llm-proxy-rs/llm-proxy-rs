@@ -47,6 +47,17 @@ impl TryFrom<&Message> for BedrockMessage {
     }
 }
 
-pub fn messages_to_bedrock_messages(messages: &[Message]) -> anyhow::Result<Vec<BedrockMessage>> {
-    messages.iter().map(BedrockMessage::try_from).collect()
+pub fn messages_to_bedrock_messages(
+    messages: &[Message],
+) -> anyhow::Result<Option<Vec<BedrockMessage>>> {
+    let bedrock_messages: Vec<BedrockMessage> = messages
+        .iter()
+        .map(BedrockMessage::try_from)
+        .collect::<Result<_, _>>()?;
+
+    Ok(if bedrock_messages.is_empty() {
+        None
+    } else {
+        Some(bedrock_messages)
+    })
 }

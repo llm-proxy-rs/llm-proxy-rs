@@ -1,5 +1,6 @@
 use aws_sdk_bedrockruntime::types::{
-    CachePointBlock, Tool as BedrockTool, ToolInputSchema, ToolSpecification,
+    AutoToolChoice, CachePointBlock, Tool as BedrockTool, ToolChoice, ToolConfiguration,
+    ToolInputSchema, ToolSpecification,
 };
 use common::value_to_document;
 use serde::{Deserialize, Serialize};
@@ -36,12 +37,32 @@ impl TryFrom<&Tool> for Vec<BedrockTool> {
     }
 }
 
-pub fn tools_to_bedrock_tools(tools: &[Tool]) -> anyhow::Result<Vec<BedrockTool>> {
-    Ok(tools
+pub fn tools_to_bedrock_tools(tools: &[Tool]) -> anyhow::Result<Option<Vec<BedrockTool>>> {
+    let bedrock_tools: Vec<BedrockTool> = tools
         .iter()
         .map(Vec::<BedrockTool>::try_from)
         .collect::<Result<Vec<_>, _>>()?
         .into_iter()
         .flatten()
-        .collect())
+        .collect();
+
+    Ok(if bedrock_tools.is_empty() {
+        None
+    } else {
+        Some(bedrock_tools)
+    })
+}
+
+pub fn tools_to_tool_configuration(tools: &[Tool]) -> anyhow::Result<Option<ToolConfiguration>> {
+    let bedrock_tools = tools_to_bedrock_tools(tools)?;
+
+    bedrock_tools
+        .map(|tools| {
+            ToolConfiguration::builder()
+                .set_tools(Some(tools))
+                .tool_choice(ToolChoice::Auto(AutoToolChoice::builder().build()))
+                .build()
+                .map_err(Into::into)
+        })
+        .transpose()
 }

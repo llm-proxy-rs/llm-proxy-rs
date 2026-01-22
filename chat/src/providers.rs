@@ -106,7 +106,10 @@ impl ChatCompletionsProvider for BedrockChatCompletionsProvider {
         )?;
         info!(
             "Processed request to Bedrock format with {} messages",
-            bedrock_chat_completion.messages.len()
+            bedrock_chat_completion
+                .messages
+                .as_ref()
+                .map_or(0, |m| m.len())
         );
 
         let config = aws_config::load_defaults(BehaviorVersion::latest()).await;
@@ -120,8 +123,8 @@ impl ChatCompletionsProvider for BedrockChatCompletionsProvider {
         let converse_builder = client
             .converse_stream()
             .model_id(&bedrock_chat_completion.model_id)
-            .set_system(Some(bedrock_chat_completion.system_content_blocks))
-            .set_messages(Some(bedrock_chat_completion.messages))
+            .set_system(bedrock_chat_completion.system_content_blocks)
+            .set_messages(bedrock_chat_completion.messages)
             .set_tool_config(bedrock_chat_completion.tool_config)
             .set_inference_config(Some(bedrock_chat_completion.inference_config))
             .set_additional_model_request_fields(
