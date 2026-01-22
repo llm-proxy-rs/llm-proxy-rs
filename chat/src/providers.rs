@@ -74,7 +74,7 @@ pub trait ChatCompletionsProvider {
     async fn chat_completions_stream<F>(
         self,
         request: ChatCompletionsRequest,
-        reasoning_effort_to_thinking_budget_tokens: Arc<ReasoningEffortToThinkingBudgetTokens>,
+        reasoning_effort_to_thinking_budget_tokens: ReasoningEffortToThinkingBudgetTokens,
         usage_callback: F,
     ) -> anyhow::Result<BoxStream<'async_trait, anyhow::Result<Event>>>
     where
@@ -94,7 +94,7 @@ impl ChatCompletionsProvider for BedrockChatCompletionsProvider {
     async fn chat_completions_stream<F>(
         self,
         request: ChatCompletionsRequest,
-        reasoning_effort_to_thinking_budget_tokens: Arc<ReasoningEffortToThinkingBudgetTokens>,
+        reasoning_effort_to_thinking_budget_tokens: ReasoningEffortToThinkingBudgetTokens,
         usage_callback: F,
     ) -> anyhow::Result<BoxStream<'async_trait, anyhow::Result<Event>>>
     where
