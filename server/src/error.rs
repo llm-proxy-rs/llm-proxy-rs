@@ -1,17 +1,17 @@
 use axum::{http::StatusCode, response::IntoResponse};
+use tracing::error;
 
 pub struct AppError(anyhow::Error);
 
 impl IntoResponse for AppError {
     fn into_response(self) -> axum::response::Response {
-        // Determine the appropriate status code based on the error
-        let status_code = if self.0.to_string().contains("Streaming is required") {
-            StatusCode::BAD_REQUEST
-        } else {
-            StatusCode::INTERNAL_SERVER_ERROR
-        };
+        error!("Request error: {:?}", self.0);
 
-        (status_code, format!("Error: {}", self.0)).into_response()
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error: {}", self.0),
+        )
+            .into_response()
     }
 }
 

@@ -3,7 +3,8 @@ use aws_sdk_bedrockruntime::types::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::content::{Contents, SystemContents};
+use crate::content::Contents;
+use crate::system_content::SystemContents;
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(tag = "role", rename_all = "lowercase")]
@@ -32,15 +33,6 @@ pub enum Message {
         #[serde(skip_serializing_if = "Option::is_none")]
         tool_call_id: Option<String>,
     },
-}
-
-#[derive(Debug, Deserialize, Serialize, PartialEq)]
-#[serde(rename_all = "lowercase")]
-pub enum Role {
-    Assistant,
-    System,
-    User,
-    Tool,
 }
 
 impl TryFrom<&Message> for Option<Vec<ContentBlock>> {
