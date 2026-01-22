@@ -10,7 +10,6 @@ mod utils;
 
 use handlers::openai::chat_completions;
 
-#[derive(Clone, Copy)]
 pub struct AppState {
     pub reasoning_effort_to_thinking_budget_tokens: ReasoningEffortToThinkingBudgetTokens,
 }

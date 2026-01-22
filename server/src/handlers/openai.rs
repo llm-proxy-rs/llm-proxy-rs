@@ -5,7 +5,7 @@ use axum::{
     response::{IntoResponse, sse::Sse},
 };
 use chat::providers::{BedrockChatCompletionsProvider, ChatCompletionsProvider};
-use request::{ChatCompletionsRequest, StreamOptions};
+use request::ChatCompletionsRequest;
 use std::sync::Arc;
 use tracing::{error, info};
 
@@ -13,7 +13,7 @@ use crate::{AppState, error::AppError, utils::usage_callback};
 
 pub async fn chat_completions(
     State(state): State<Arc<AppState>>,
-    Json(mut payload): Json<ChatCompletionsRequest>,
+    Json(payload): Json<ChatCompletionsRequest>,
 ) -> Result<impl IntoResponse, AppError> {
     info!(
         "Received OpenAI chat completions request for model: {}",
@@ -24,10 +24,6 @@ pub async fn chat_completions(
         error!("Stream is set to false");
         return Err(anyhow::anyhow!("Stream is set to false").into());
     }
-
-    payload.stream_options = Some(StreamOptions {
-        include_usage: true,
-    });
 
     info!("Using Bedrock provider for model: {}", payload.model);
 
