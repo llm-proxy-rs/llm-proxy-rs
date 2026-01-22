@@ -6,7 +6,7 @@ use aws_smithy_types::Document;
 use request::ChatCompletionsRequest;
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 pub struct ReasoningEffortToThinkingBudgetTokens {
     pub low: i32,
     pub medium: i32,

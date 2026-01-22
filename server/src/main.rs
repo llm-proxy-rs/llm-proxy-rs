@@ -1,62 +1,18 @@
-use axum::{
-    Json, Router,
-    extract::State,
-    http::StatusCode,
-    response::{IntoResponse, sse::Sse},
-    routing::post,
-};
-use chat::{
-    bedrock::ReasoningEffortToThinkingBudgetTokens,
-    providers::{BedrockChatCompletionsProvider, ChatCompletionsProvider},
-};
+use axum::{Router, routing::post};
+use chat::bedrock::ReasoningEffortToThinkingBudgetTokens;
 use config::{Config, File};
-use request::{ChatCompletionsRequest, StreamOptions};
 use std::sync::Arc;
-use tracing::{debug, error, info};
+use tracing::info;
 
 mod error;
+mod handlers;
 mod utils;
 
-use crate::error::AppError;
-use crate::utils::usage_callback;
+use handlers::openai::chat_completions;
 
-#[derive(Clone)]
-struct AppState {
-    reasoning_effort_to_thinking_budget_tokens: Arc<ReasoningEffortToThinkingBudgetTokens>,
-}
-
-async fn chat_completions(
-    State(state): State<Arc<AppState>>,
-    Json(mut payload): Json<ChatCompletionsRequest>,
-) -> Result<impl IntoResponse, AppError> {
-    debug!(
-        "Received chat completions request for model: {}",
-        payload.model
-    );
-
-    if payload.stream == Some(false) {
-        error!("Streaming is required but was disabled");
-        return Err(AppError::from(anyhow::anyhow!(
-            "Streaming is required but was disabled"
-        )));
-    }
-
-    payload.stream_options = Some(StreamOptions {
-        include_usage: true,
-    });
-
-    info!("Using Bedrock provider for model: {}", payload.model);
-
-    let stream = BedrockChatCompletionsProvider::new()
-        .await
-        .chat_completions_stream(
-            payload,
-            state.reasoning_effort_to_thinking_budget_tokens.clone(),
-            usage_callback,
-        )
-        .await?;
-
-    Ok((StatusCode::OK, Sse::new(stream)))
+#[derive(Clone, Copy)]
+pub struct AppState {
+    pub reasoning_effort_to_thinking_budget_tokens: ReasoningEffortToThinkingBudgetTokens,
 }
 
 async fn load_config() -> anyhow::Result<(String, u16, ReasoningEffortToThinkingBudgetTokens)> {
@@ -93,9 +49,7 @@ async fn main() -> anyhow::Result<()> {
     info!("Starting server on {}:{}", host, port);
 
     let state = Arc::new(AppState {
-        reasoning_effort_to_thinking_budget_tokens: Arc::new(
-            reasoning_effort_to_thinking_budget_tokens,
-        ),
+        reasoning_effort_to_thinking_budget_tokens,
     });
 
     let app = Router::new()
