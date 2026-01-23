@@ -11,16 +11,23 @@ pub struct Thinking {
 impl From<&Thinking> for Document {
     fn from(thinking: &Thinking) -> Self {
         Document::Object(
-            [
-                (
-                    "type".to_string(),
-                    Document::String(thinking.thinking_type.clone()),
+            [(
+                "thinking".to_string(),
+                Document::Object(
+                    [
+                        (
+                            "type".to_string(),
+                            Document::String(thinking.thinking_type.clone()),
+                        ),
+                        (
+                            "budget_tokens".to_string(),
+                            Document::from(thinking.budget_tokens),
+                        ),
+                    ]
+                    .into_iter()
+                    .collect(),
                 ),
-                (
-                    "budget_tokens".to_string(),
-                    Document::from(thinking.budget_tokens),
-                ),
-            ]
+            )]
             .into_iter()
             .collect(),
         )
