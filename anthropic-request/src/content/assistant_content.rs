@@ -7,6 +7,13 @@ use serde::{Deserialize, Serialize};
 use crate::cache_control::CacheControl;
 
 #[derive(Debug, Deserialize, Serialize)]
+#[serde(untagged)]
+pub enum AssistantContents {
+    Array(Vec<AssistantContent>),
+    String(String),
+}
+
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(tag = "type")]
 pub enum AssistantContent {
     #[serde(rename = "text")]
@@ -23,6 +30,23 @@ pub enum AssistantContent {
     },
     #[serde(rename = "thinking")]
     Thinking { thinking: String, signature: String },
+}
+
+impl TryFrom<&AssistantContents> for Vec<ContentBlock> {
+    type Error = anyhow::Error;
+
+    fn try_from(contents: &AssistantContents) -> Result<Self, Self::Error> {
+        match contents {
+            AssistantContents::String(s) => Ok(vec![ContentBlock::Text(s.clone())]),
+            AssistantContents::Array(arr) => Ok(arr
+                .iter()
+                .map(Vec::try_from)
+                .collect::<Result<Vec<_>, _>>()?
+                .into_iter()
+                .flatten()
+                .collect()),
+        }
+    }
 }
 
 impl TryFrom<&AssistantContent> for Vec<ContentBlock> {

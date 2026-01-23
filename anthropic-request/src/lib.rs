@@ -19,7 +19,7 @@ pub use tool_result_content::*;
 #[derive(Debug, Deserialize, Serialize)]
 pub struct V1MessagesRequest {
     pub max_tokens: i32,
-    pub messages: Vec<Message>,
+    pub messages: Messages,
     pub model: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stream: Option<bool>,
