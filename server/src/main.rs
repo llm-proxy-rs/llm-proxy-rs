@@ -8,6 +8,7 @@ mod error;
 mod handlers;
 mod utils;
 
+use handlers::anthropic::v1_messages;
 use handlers::openai::chat_completions;
 
 pub struct AppState {
@@ -53,6 +54,7 @@ async fn main() -> anyhow::Result<()> {
 
     let app = Router::new()
         .route("/chat/completions", post(chat_completions))
+        .route("/v1/messages", post(v1_messages))
         .with_state(state);
 
     info!("Routes configured, binding to {}:{}", host, port);

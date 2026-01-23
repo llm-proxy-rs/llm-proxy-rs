@@ -1,5 +1,5 @@
 pub mod bedrock;
-pub mod providers;
+pub mod provider;
 
 use axum::response::sse::Event;
 use response::ChatCompletionsResponse;

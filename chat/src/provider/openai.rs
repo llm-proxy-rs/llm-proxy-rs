@@ -1,11 +1,4 @@
-use crate::{
-    DONE_MESSAGE,
-    bedrock::{
-        ReasoningEffortToThinkingBudgetTokens,
-        process_chat_completions_request_to_bedrock_chat_completion,
-    },
-    create_sse_event,
-};
+use crate::{DONE_MESSAGE, create_sse_event};
 use async_trait::async_trait;
 use aws_config::BehaviorVersion;
 use aws_sdk_bedrockruntime::Client;
@@ -19,6 +12,9 @@ use response::converse_stream_output_to_chat_completions_response_builder;
 use std::sync::Arc;
 use tracing::info;
 use uuid::Uuid;
+
+use crate::bedrock::ReasoningEffortToThinkingBudgetTokens;
+use crate::bedrock::openai::process_chat_completions_request_to_bedrock_chat_completion;
 
 async fn process_bedrock_stream(
     mut stream: EventReceiver<
@@ -105,7 +101,7 @@ impl ChatCompletionsProvider for BedrockChatCompletionsProvider {
             &reasoning_effort_to_thinking_budget_tokens,
         )?;
         info!(
-            "Processed request to Bedrock format with {} messages",
+            "Processed OpenAI request to Bedrock format with {} messages",
             bedrock_chat_completion
                 .messages
                 .as_ref()
@@ -116,7 +112,7 @@ impl ChatCompletionsProvider for BedrockChatCompletionsProvider {
         let client = Client::new(&config);
 
         info!(
-            "Sending request to Bedrock API for model: {}",
+            "Sending OpenAI request to Bedrock API for model: {}",
             bedrock_chat_completion.model_id
         );
 
@@ -131,7 +127,7 @@ impl ChatCompletionsProvider for BedrockChatCompletionsProvider {
                 bedrock_chat_completion.additional_model_request_fields,
             );
 
-        info!("About to send request to Bedrock...");
+        info!("About to send OpenAI request to Bedrock...");
         let result = converse_builder.send().await;
 
         let stream = match result {

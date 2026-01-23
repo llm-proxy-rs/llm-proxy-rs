@@ -24,6 +24,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "anthropic-response"
+version = "0.1.0"
+dependencies = [
+ "aws-sdk-bedrockruntime",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "anyhow"
 version = "1.0.100"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -629,6 +638,7 @@ name = "chat"
 version = "0.1.0"
 dependencies = [
  "anthropic-request",
+ "anthropic-response",
  "anyhow",
  "async-stream",
  "async-trait",
@@ -2315,6 +2325,7 @@ dependencies = [
 name = "server"
 version = "0.1.0"
 dependencies = [
+ "anthropic-request",
  "anyhow",
  "aws-sdk-bedrockruntime",
  "axum",
