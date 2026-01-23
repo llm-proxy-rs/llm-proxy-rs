@@ -21,16 +21,15 @@ async fn process_bedrock_stream(
 ) -> BoxStream<'static, anyhow::Result<Event>> {
     let stream = async_stream::stream! {
         let mut converter = EventConverter::new(id, model, usage_callback);
-        let mut previous_converse_stream_output: Option<ConverseStreamOutput> = None;
 
         loop {
             match stream.recv().await {
                 Ok(Some(converse_stream_output)) => {
-                    if let Some(events) = converter.convert(&converse_stream_output, previous_converse_stream_output.as_ref()) {
-                        for event in events {
+                    if let Some(events) = converter.convert(&converse_stream_output) {
+                        for (event_name, event) in events {
                             match serde_json::to_string(&event) {
                                 Ok(json) => {
-                                    yield Ok(Event::default().event("event").data(json));
+                                    yield Ok(Event::default().event(event_name).data(json));
                                 }
                                 Err(e) => {
                                     yield Err(anyhow::anyhow!("Failed to serialize event: {}", e));
@@ -38,8 +37,6 @@ async fn process_bedrock_stream(
                             }
                         }
                     }
-
-                    previous_converse_stream_output = Some(converse_stream_output);
                 }
                 Ok(None) => {
                     break;
