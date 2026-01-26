@@ -119,6 +119,12 @@ impl EventConverter {
                 self.previous_converse_stream_output_type_is_message_start_or_content_block_stop =
                     false;
 
+                if let ContentBlockDelta::InputJsonDelta { partial_json } = &delta
+                    && partial_json.is_empty()
+                {
+                    return None;
+                }
+
                 Some(vec![(
                     "content_block_delta",
                     Event::content_block_delta_builder()
