@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 anyhow = "1.0.100"
+anthropic-request = { path = "../anthropic-request" }
 aws-sdk-bedrockruntime = "1.122.0"
 axum = "0.8.8"
 chat = { path = "../chat" }

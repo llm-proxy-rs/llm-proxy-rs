@@ -1,6 +1,6 @@
 [workspace]
 
 members = [
-    "chat", "common",
+    "anthropic-request", "anthropic-response", "chat", "common",
     "request", "response", "server",
 ]

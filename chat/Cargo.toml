@@ -5,6 +5,8 @@ edition = "2024"
 
 [dependencies]
 anyhow = "1.0.100"
+anthropic-request = { path = "../anthropic-request" }
+anthropic-response = { path = "../anthropic-response" }
 async-stream = "0.3.6"
 async-trait = "0.1.89"
 aws-config = "1.8.12"

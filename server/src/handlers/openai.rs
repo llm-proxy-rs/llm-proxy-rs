@@ -4,7 +4,7 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, sse::Sse},
 };
-use chat::providers::{BedrockChatCompletionsProvider, ChatCompletionsProvider};
+use chat::provider::{BedrockChatCompletionsProvider, ChatCompletionsProvider};
 use request::ChatCompletionsRequest;
 use std::sync::Arc;
 use tracing::{error, info};
@@ -24,8 +24,6 @@ pub async fn chat_completions(
         error!("Stream is set to false");
         return Err(anyhow::anyhow!("Stream is set to false").into());
     }
-
-    info!("Using Bedrock provider for model: {}", payload.model);
 
     let stream = BedrockChatCompletionsProvider::new()
         .await

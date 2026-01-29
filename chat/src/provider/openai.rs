@@ -1,11 +1,4 @@
-use crate::{
-    DONE_MESSAGE,
-    bedrock::{
-        ReasoningEffortToThinkingBudgetTokens,
-        process_chat_completions_request_to_bedrock_chat_completion,
-    },
-    create_sse_event,
-};
+use crate::{DONE_MESSAGE, create_sse_event};
 use async_trait::async_trait;
 use aws_config::BehaviorVersion;
 use aws_sdk_bedrockruntime::Client;
@@ -19,6 +12,9 @@ use response::converse_stream_output_to_chat_completions_response_builder;
 use std::sync::Arc;
 use tracing::info;
 use uuid::Uuid;
+
+use crate::bedrock::ReasoningEffortToThinkingBudgetTokens;
+use crate::bedrock::openai::process_chat_completions_request_to_bedrock_chat_completion;
 
 async fn process_bedrock_stream(
     mut stream: EventReceiver<
@@ -105,30 +101,33 @@ impl ChatCompletionsProvider for BedrockChatCompletionsProvider {
             &reasoning_effort_to_thinking_budget_tokens,
         )?;
         info!(
-            "Processed request to Bedrock format with {} messages",
-            bedrock_chat_completion.messages.len()
+            "Processed OpenAI request to Bedrock format with {} messages",
+            bedrock_chat_completion
+                .messages
+                .as_ref()
+                .map_or(0, |m| m.len())
         );
 
         let config = aws_config::load_defaults(BehaviorVersion::latest()).await;
         let client = Client::new(&config);
 
         info!(
-            "Sending request to Bedrock API for model: {}",
+            "Sending OpenAI request to Bedrock API for model: {}",
             bedrock_chat_completion.model_id
         );
 
         let converse_builder = client
             .converse_stream()
             .model_id(&bedrock_chat_completion.model_id)
-            .set_system(Some(bedrock_chat_completion.system_content_blocks))
-            .set_messages(Some(bedrock_chat_completion.messages))
+            .set_system(bedrock_chat_completion.system_content_blocks)
+            .set_messages(bedrock_chat_completion.messages)
             .set_tool_config(bedrock_chat_completion.tool_config)
             .set_inference_config(Some(bedrock_chat_completion.inference_config))
             .set_additional_model_request_fields(
                 bedrock_chat_completion.additional_model_request_fields,
             );
 
-        info!("About to send request to Bedrock...");
+        info!("About to send OpenAI request to Bedrock...");
         let result = converse_builder.send().await;
 
         let stream = match result {
