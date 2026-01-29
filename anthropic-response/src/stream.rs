@@ -86,34 +86,30 @@ impl EventConverter {
                     .as_ref()
                     .and_then(bedrock_content_block_delta_to_content_block_delta)?;
 
+                let mut events = vec![];
+
                 if self.previous_converse_stream_output_type_is_message_start_or_content_block_stop
                     && let Some(content_block) = match &delta {
-                        ContentBlockDelta::TextDelta { text } => {
-                            Some(ContentBlock::text_builder().text(text.clone()).build())
+                        ContentBlockDelta::TextDelta { .. } => {
+                            Some(ContentBlock::text_builder().text(String::new()).build())
                         }
-                        ContentBlockDelta::ThinkingDelta { thinking } => Some(
-                            ContentBlock::thinking_builder()
-                                .thinking(thinking.clone())
-                                .signature(String::new())
-                                .build(),
-                        ),
-                        ContentBlockDelta::SignatureDelta { signature } => Some(
+                        ContentBlockDelta::ThinkingDelta { .. }
+                        | ContentBlockDelta::SignatureDelta { .. } => Some(
                             ContentBlock::thinking_builder()
                                 .thinking(String::new())
-                                .signature(signature.clone())
+                                .signature(String::new())
                                 .build(),
                         ),
                         _ => None,
                     }
                 {
-                    self.previous_converse_stream_output_type_is_message_start_or_content_block_stop = false;
-                    return Some(vec![(
+                    events.push((
                         "content_block_start",
                         Event::content_block_start_builder()
                             .content_block(content_block)
                             .index(event.content_block_index)
                             .build(),
-                    )]);
+                    ));
                 }
 
                 self.previous_converse_stream_output_type_is_message_start_or_content_block_stop =
@@ -125,13 +121,15 @@ impl EventConverter {
                     return None;
                 }
 
-                Some(vec![(
+                events.push((
                     "content_block_delta",
                     Event::content_block_delta_builder()
                         .delta(delta)
                         .index(event.content_block_index)
                         .build(),
-                )])
+                ));
+
+                Some(events)
             }
             ConverseStreamOutput::ContentBlockStop(event) => {
                 self.previous_converse_stream_output_type_is_message_start_or_content_block_stop =
