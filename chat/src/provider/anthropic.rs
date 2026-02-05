@@ -167,17 +167,19 @@ impl V1MessagesProvider for BedrockV1MessagesProvider {
         let additional_model_request_fields = request.thinking.as_ref().map(Document::from);
 
         let converse_tokens_request = ConverseTokensRequest::builder()
+            .set_additional_model_request_fields(additional_model_request_fields)
             .set_messages(messages)
             .set_system(system)
             .set_tool_config(tool_config)
-            .set_additional_model_request_fields(additional_model_request_fields)
             .build();
 
         let count_tokens_input = CountTokensInput::Converse(converse_tokens_request);
 
         let model_id = inference_profile_prefixes
             .iter()
-            .find_map(|prefix| request.model.strip_prefix(prefix))
+            .find_map(|inference_profile_prefix| {
+                request.model.strip_prefix(inference_profile_prefix)
+            })
             .unwrap_or(&request.model);
 
         let result = client
