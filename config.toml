@@ -6,5 +6,4 @@ low = 1024
 medium = 2048
 high = 4096
 
-# Prefixes used to detect inference profiles in model IDs.
 inference_profile_prefixes = ["us."]
