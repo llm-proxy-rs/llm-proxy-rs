@@ -14,15 +14,15 @@ use aws_smithy_types::Document;
 use axum::response::sse::Event;
 use futures::stream::{BoxStream, StreamExt};
 use std::sync::Arc;
-use tracing::info;
+use tracing::{error, info};
 use uuid::Uuid;
 
 async fn process_bedrock_stream(
     mut stream: EventReceiver<ConverseStreamOutput, ConverseStreamOutputError>,
-    id: String,
     model: String,
     usage_callback: Arc<dyn Fn(&TokenUsage) + Send + Sync>,
 ) -> BoxStream<'static, anyhow::Result<Event>> {
+    let id = format!("msg_{}", Uuid::new_v4());
     let stream = async_stream::stream! {
         let mut converter = EventConverter::new(id, model, usage_callback);
 
@@ -128,14 +128,12 @@ impl V1MessagesProvider for BedrockV1MessagesProvider {
             Ok(response) => {
                 info!("Successfully connected to Bedrock stream for Anthropic format");
                 let stream = response.stream;
-
-                let id = format!("msg_{}", Uuid::new_v4());
                 let usage_callback = Arc::new(usage_callback);
 
-                Ok(process_bedrock_stream(stream, id, model, usage_callback).await)
+                Ok(process_bedrock_stream(stream, model, usage_callback).await)
             }
             Err(e) => {
-                tracing::error!("Bedrock API error: {:?}", e);
+                error!("Bedrock API error: {:?}", e);
                 Err(anyhow::anyhow!("Bedrock API error: {}", e))
             }
         }
@@ -187,8 +185,14 @@ impl V1MessagesProvider for BedrockV1MessagesProvider {
             .model_id(model_id)
             .input(count_tokens_input)
             .send()
-            .await?;
+            .await;
 
-        Ok(result.input_tokens)
+        match result {
+            Ok(response) => Ok(response.input_tokens),
+            Err(e) => {
+                error!("Bedrock API error: {:?}", e);
+                Err(anyhow::anyhow!("Bedrock API error: {}", e))
+            }
+        }
     }
 }
