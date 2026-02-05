@@ -5,3 +5,5 @@ port = 3000
 low = 1024
 medium = 2048
 high = 4096
+
+inference_profile_prefixes = ["us."]

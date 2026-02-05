@@ -1,24 +1,28 @@
-use anthropic_request::V1MessagesRequest;
+use anthropic_request::{
+    V1MessagesCountTokensRequest, V1MessagesRequest, tools_to_tool_configuration,
+};
 use anthropic_response::EventConverter;
 use async_trait::async_trait;
 use aws_config::BehaviorVersion;
 use aws_sdk_bedrockruntime::Client;
 use aws_sdk_bedrockruntime::primitives::event_stream::EventReceiver;
 use aws_sdk_bedrockruntime::types::{
-    ConverseStreamOutput, TokenUsage, error::ConverseStreamOutputError,
+    ConverseStreamOutput, ConverseTokensRequest, CountTokensInput, Message, SystemContentBlock,
+    TokenUsage, error::ConverseStreamOutputError,
 };
+use aws_smithy_types::Document;
 use axum::response::sse::Event;
 use futures::stream::{BoxStream, StreamExt};
 use std::sync::Arc;
-use tracing::info;
+use tracing::{error, info};
 use uuid::Uuid;
 
 async fn process_bedrock_stream(
     mut stream: EventReceiver<ConverseStreamOutput, ConverseStreamOutputError>,
-    id: String,
     model: String,
     usage_callback: Arc<dyn Fn(&TokenUsage) + Send + Sync>,
 ) -> BoxStream<'static, anyhow::Result<Event>> {
+    let id = format!("msg_{}", Uuid::new_v4());
     let stream = async_stream::stream! {
         let mut converter = EventConverter::new(id, model, usage_callback);
 
@@ -62,6 +66,12 @@ pub trait V1MessagesProvider {
     ) -> anyhow::Result<BoxStream<'async_trait, anyhow::Result<Event>>>
     where
         F: Fn(&TokenUsage) + Send + Sync + 'static;
+
+    async fn v1_messages_count_tokens(
+        &self,
+        request: &V1MessagesCountTokensRequest,
+        inference_profile_prefixes: &[String],
+    ) -> anyhow::Result<i32>;
 }
 
 pub struct BedrockV1MessagesProvider {}
@@ -118,14 +128,69 @@ impl V1MessagesProvider for BedrockV1MessagesProvider {
             Ok(response) => {
                 info!("Successfully connected to Bedrock stream for Anthropic format");
                 let stream = response.stream;
-
-                let id = format!("msg_{}", Uuid::new_v4());
                 let usage_callback = Arc::new(usage_callback);
 
-                Ok(process_bedrock_stream(stream, id, model, usage_callback).await)
+                Ok(process_bedrock_stream(stream, model, usage_callback).await)
             }
             Err(e) => {
-                tracing::error!("Bedrock API error: {:?}", e);
+                error!("Bedrock API error: {:?}", e);
+                Err(anyhow::anyhow!("Bedrock API error: {}", e))
+            }
+        }
+    }
+
+    async fn v1_messages_count_tokens(
+        &self,
+        request: &V1MessagesCountTokensRequest,
+        inference_profile_prefixes: &[String],
+    ) -> anyhow::Result<i32> {
+        let config = aws_config::load_defaults(BehaviorVersion::latest()).await;
+        let client = Client::new(&config);
+
+        let messages: Option<Vec<Message>> = Option::try_from(&request.messages)?;
+
+        let system: Option<Vec<SystemContentBlock>> = request
+            .system
+            .as_ref()
+            .map(Vec::<SystemContentBlock>::try_from)
+            .transpose()?;
+
+        let tool_config = request
+            .tools
+            .as_deref()
+            .map(tools_to_tool_configuration)
+            .transpose()?
+            .flatten();
+
+        let additional_model_request_fields = request.thinking.as_ref().map(Document::from);
+
+        let converse_tokens_request = ConverseTokensRequest::builder()
+            .set_additional_model_request_fields(additional_model_request_fields)
+            .set_messages(messages)
+            .set_system(system)
+            .set_tool_config(tool_config)
+            .build();
+
+        let count_tokens_input = CountTokensInput::Converse(converse_tokens_request);
+
+        let model_id = inference_profile_prefixes
+            .iter()
+            .find_map(|inference_profile_prefix| {
+                request.model.strip_prefix(inference_profile_prefix)
+            })
+            .unwrap_or(&request.model);
+
+        let result = client
+            .count_tokens()
+            .model_id(model_id)
+            .input(count_tokens_input)
+            .send()
+            .await;
+
+        match result {
+            Ok(response) => Ok(response.input_tokens),
+            Err(e) => {
+                error!("Bedrock API error: {:?}", e);
                 Err(anyhow::anyhow!("Bedrock API error: {}", e))
             }
         }
