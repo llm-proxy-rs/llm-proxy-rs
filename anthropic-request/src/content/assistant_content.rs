@@ -38,13 +38,25 @@ impl TryFrom<&AssistantContents> for Vec<ContentBlock> {
     fn try_from(contents: &AssistantContents) -> Result<Self, Self::Error> {
         match contents {
             AssistantContents::String(s) => Ok(vec![ContentBlock::Text(s.clone())]),
-            AssistantContents::Array(arr) => Ok(arr
-                .iter()
-                .map(Vec::try_from)
-                .collect::<Result<Vec<_>, _>>()?
-                .into_iter()
-                .flatten()
-                .collect()),
+            AssistantContents::Array(arr) => {
+                let all_content_blocks: Vec<ContentBlock> = arr
+                    .iter()
+                    .map(Vec::try_from)
+                    .collect::<Result<Vec<_>, _>>()?
+                    .into_iter()
+                    .flatten()
+                    .collect();
+
+                let (reasoning_content_blocks, other_content_blocks): (Vec<_>, Vec<_>) =
+                    all_content_blocks.into_iter().partition(|content_block| {
+                        matches!(content_block, ContentBlock::ReasoningContent(_))
+                    });
+
+                Ok(reasoning_content_blocks
+                    .into_iter()
+                    .chain(other_content_blocks)
+                    .collect())
+            }
         }
     }
 }
