@@ -8,14 +8,20 @@ mod error;
 mod handlers;
 mod utils;
 
-use handlers::anthropic::v1_messages;
+use handlers::anthropic::{v1_messages, v1_messages_count_tokens};
 use handlers::openai::chat_completions;
 
 pub struct AppState {
     pub reasoning_effort_to_thinking_budget_tokens: ReasoningEffortToThinkingBudgetTokens,
+    pub inference_profile_prefixes: Vec<String>,
 }
 
-async fn load_config() -> anyhow::Result<(String, u16, ReasoningEffortToThinkingBudgetTokens)> {
+async fn load_config() -> anyhow::Result<(
+    String,
+    u16,
+    ReasoningEffortToThinkingBudgetTokens,
+    Vec<String>,
+)> {
     let settings = Config::builder()
         .add_source(File::with_name("config"))
         .build()?;
@@ -30,6 +36,10 @@ async fn load_config() -> anyhow::Result<(String, u16, ReasoningEffortToThinking
             .get("reasoning_effort_to_thinking_budget_tokens")
             .unwrap_or_else(|_| ReasoningEffortToThinkingBudgetTokens::default());
 
+    let inference_profile_prefixes: Vec<String> = settings
+        .get("inference_profile_prefixes")
+        .unwrap_or_else(|_| vec!["us.".to_string()]);
+
     info!(
         "reasoning_effort to thinking budget_tokens - low: {}, medium: {}, high: {}",
         reasoning_effort_to_thinking_budget_tokens.low,
@@ -37,7 +47,17 @@ async fn load_config() -> anyhow::Result<(String, u16, ReasoningEffortToThinking
         reasoning_effort_to_thinking_budget_tokens.high
     );
 
-    Ok((host, port, reasoning_effort_to_thinking_budget_tokens))
+    info!(
+        "inference_profile_prefixes: {:?}",
+        inference_profile_prefixes
+    );
+
+    Ok((
+        host,
+        port,
+        reasoning_effort_to_thinking_budget_tokens,
+        inference_profile_prefixes,
+    ))
 }
 
 #[tokio::main]
@@ -45,16 +65,19 @@ async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
     info!("Initializing LLM proxy server");
 
-    let (host, port, reasoning_effort_to_thinking_budget_tokens) = load_config().await?;
+    let (host, port, reasoning_effort_to_thinking_budget_tokens, inference_profile_prefixes) =
+        load_config().await?;
     info!("Starting server on {}:{}", host, port);
 
     let state = Arc::new(AppState {
         reasoning_effort_to_thinking_budget_tokens,
+        inference_profile_prefixes,
     });
 
     let app = Router::new()
         .route("/chat/completions", post(chat_completions))
         .route("/v1/messages", post(v1_messages))
+        .route("/v1/messages/count_tokens", post(v1_messages_count_tokens))
         .with_state(state);
 
     info!("Routes configured, binding to {}:{}", host, port);

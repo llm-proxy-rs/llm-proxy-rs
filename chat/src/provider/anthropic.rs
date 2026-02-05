@@ -1,12 +1,16 @@
-use anthropic_request::V1MessagesRequest;
+use anthropic_request::{
+    V1MessagesCountTokensRequest, V1MessagesRequest, tools_to_tool_configuration,
+};
 use anthropic_response::EventConverter;
 use async_trait::async_trait;
 use aws_config::BehaviorVersion;
 use aws_sdk_bedrockruntime::Client;
 use aws_sdk_bedrockruntime::primitives::event_stream::EventReceiver;
 use aws_sdk_bedrockruntime::types::{
-    ConverseStreamOutput, TokenUsage, error::ConverseStreamOutputError,
+    ConverseStreamOutput, ConverseTokensRequest, CountTokensInput, Message, SystemContentBlock,
+    TokenUsage, error::ConverseStreamOutputError,
 };
+use aws_smithy_types::Document;
 use axum::response::sse::Event;
 use futures::stream::{BoxStream, StreamExt};
 use std::sync::Arc;
@@ -62,6 +66,12 @@ pub trait V1MessagesProvider {
     ) -> anyhow::Result<BoxStream<'async_trait, anyhow::Result<Event>>>
     where
         F: Fn(&TokenUsage) + Send + Sync + 'static;
+
+    async fn v1_messages_count_tokens(
+        &self,
+        request: &V1MessagesCountTokensRequest,
+        inference_profile_prefixes: &[String],
+    ) -> anyhow::Result<i32>;
 }
 
 pub struct BedrockV1MessagesProvider {}
@@ -129,5 +139,54 @@ impl V1MessagesProvider for BedrockV1MessagesProvider {
                 Err(anyhow::anyhow!("Bedrock API error: {}", e))
             }
         }
+    }
+
+    async fn v1_messages_count_tokens(
+        &self,
+        request: &V1MessagesCountTokensRequest,
+        inference_profile_prefixes: &[String],
+    ) -> anyhow::Result<i32> {
+        let config = aws_config::load_defaults(BehaviorVersion::latest()).await;
+        let client = Client::new(&config);
+
+        let messages: Option<Vec<Message>> = Option::try_from(&request.messages)?;
+
+        let system: Option<Vec<SystemContentBlock>> = request
+            .system
+            .as_ref()
+            .map(Vec::<SystemContentBlock>::try_from)
+            .transpose()?;
+
+        let tool_config = request
+            .tools
+            .as_deref()
+            .map(tools_to_tool_configuration)
+            .transpose()?
+            .flatten();
+
+        let additional_model_request_fields = request.thinking.as_ref().map(Document::from);
+
+        let converse_tokens_request = ConverseTokensRequest::builder()
+            .set_messages(messages)
+            .set_system(system)
+            .set_tool_config(tool_config)
+            .set_additional_model_request_fields(additional_model_request_fields)
+            .build();
+
+        let count_tokens_input = CountTokensInput::Converse(converse_tokens_request);
+
+        let model_id = inference_profile_prefixes
+            .iter()
+            .find_map(|prefix| request.model.strip_prefix(prefix))
+            .unwrap_or(&request.model);
+
+        let result = client
+            .count_tokens()
+            .model_id(model_id)
+            .input(count_tokens_input)
+            .send()
+            .await?;
+
+        Ok(result.input_tokens)
     }
 }
