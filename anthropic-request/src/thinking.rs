@@ -2,10 +2,10 @@ use aws_smithy_types::Document;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize, Serialize)]
-pub struct Thinking {
-    #[serde(rename = "type")]
-    pub thinking_type: String,
-    pub budget_tokens: i32,
+#[serde(tag = "type", rename_all = "lowercase")]
+pub enum Thinking {
+    Enabled { budget_tokens: i32 },
+    Adaptive,
 }
 
 impl From<&Thinking> for Document {
@@ -13,20 +13,19 @@ impl From<&Thinking> for Document {
         Document::Object(
             [(
                 "thinking".to_string(),
-                Document::Object(
-                    [
-                        (
-                            "type".to_string(),
-                            Document::String(thinking.thinking_type.clone()),
-                        ),
-                        (
-                            "budget_tokens".to_string(),
-                            Document::from(thinking.budget_tokens),
-                        ),
+                Document::Object(match thinking {
+                    Thinking::Enabled { budget_tokens } => [
+                        ("type".to_string(), Document::String("enabled".to_string())),
+                        ("budget_tokens".to_string(), Document::from(*budget_tokens)),
                     ]
                     .into_iter()
                     .collect(),
-                ),
+                    Thinking::Adaptive => {
+                        [("type".to_string(), Document::String("adaptive".to_string()))]
+                            .into_iter()
+                            .collect()
+                    }
+                }),
             )]
             .into_iter()
             .collect(),
