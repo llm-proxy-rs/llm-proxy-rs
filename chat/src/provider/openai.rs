@@ -16,7 +16,7 @@ use uuid::Uuid;
 use crate::bedrock::ReasoningEffortToThinkingBudgetTokens;
 use crate::bedrock::openai::process_chat_completions_request_to_bedrock_chat_completion;
 
-async fn process_bedrock_stream(
+fn process_bedrock_stream(
     mut stream: EventReceiver<
         aws_sdk_bedrockruntime::types::ConverseStreamOutput,
         ConverseStreamOutputError,
@@ -146,6 +146,6 @@ impl ChatCompletionsProvider for BedrockChatCompletionsProvider {
 
         let usage_callback = Arc::new(usage_callback);
 
-        Ok(process_bedrock_stream(stream, id, created, usage_callback).await)
+        Ok(process_bedrock_stream(stream, id, created, usage_callback))
     }
 }
