@@ -13,47 +13,52 @@ use aws_sdk_bedrockruntime::types::{
 use aws_smithy_types::Document;
 use axum::response::sse::Event;
 use futures::stream::{BoxStream, StreamExt};
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
+use tokio::time::{Instant, interval_at};
 use tracing::{error, info};
 use uuid::Uuid;
 
-async fn process_bedrock_stream(
+const PING_INTERVAL: Duration = Duration::from_secs(20);
+
+fn process_bedrock_stream(
     mut stream: EventReceiver<ConverseStreamOutput, ConverseStreamOutputError>,
     model: String,
     usage_callback: Arc<dyn Fn(&TokenUsage) + Send + Sync>,
 ) -> BoxStream<'static, anyhow::Result<Event>> {
     let id = format!("msg_{}", Uuid::new_v4());
     let stream = async_stream::stream! {
-        let mut converter = EventConverter::new(id, model, usage_callback);
+        let mut event_converter = EventConverter::new(id, model, usage_callback);
+        let mut ping_interval = interval_at(Instant::now() + PING_INTERVAL, PING_INTERVAL);
 
         loop {
-            match stream.recv().await {
-                Ok(Some(converse_stream_output)) => {
-                    if let Some(events) = converter.convert(&converse_stream_output) {
-                        for (event_name, event) in events {
-                            match serde_json::to_string(&event) {
-                                Ok(json) => {
-                                    yield Ok(Event::default().event(event_name).data(json));
-                                }
-                                Err(e) => {
-                                    yield Err(anyhow::anyhow!("Failed to serialize event: {}", e));
+            tokio::select! {
+                result = stream.recv() => {
+                    match result {
+                        Ok(Some(output)) => {
+                            if let Some(events) = event_converter.convert(&output) {
+                                for (event_name, event) in events {
+                                    match serde_json::to_string(&event) {
+                                        Ok(json) => yield Ok(Event::default().event(event_name).data(json)),
+                                        Err(e) => yield Err(anyhow::anyhow!("Failed to serialize event: {}", e)),
+                                    }
                                 }
                             }
                         }
+                        Ok(None) => break,
+                        Err(e) => {
+                            yield Err(anyhow::anyhow!("Stream receive error: {}", e));
+                            break;
+                        }
                     }
                 }
-                Ok(None) => {
-                    break;
-                }
-                Err(e) => {
-                    yield Err(anyhow::anyhow!("Stream receive error: {}", e));
+                _ = ping_interval.tick() => {
+                    info!("Sending ping event");
+                    yield Ok(Event::default().event("ping").data(r#"{"type": "ping"}"#));
                 }
             }
         }
-
         info!("Bedrock stream finished");
     };
-
     stream.boxed()
 }
 
@@ -130,7 +135,7 @@ impl V1MessagesProvider for BedrockV1MessagesProvider {
                 let stream = response.stream;
                 let usage_callback = Arc::new(usage_callback);
 
-                Ok(process_bedrock_stream(stream, model, usage_callback).await)
+                Ok(process_bedrock_stream(stream, model, usage_callback))
             }
             Err(e) => {
                 error!("Bedrock API error: {:?}", e);
