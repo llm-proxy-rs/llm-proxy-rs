@@ -32,6 +32,7 @@ fn process_bedrock_stream(
 
         loop {
             tokio::select! {
+                biased;
                 result = stream.recv() => {
                     match result {
                         Ok(Some(output)) => {
