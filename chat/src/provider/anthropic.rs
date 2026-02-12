@@ -68,6 +68,7 @@ pub trait V1MessagesProvider {
     async fn v1_messages_stream<F>(
         self,
         request: V1MessagesRequest,
+        response_model_id: Option<String>,
         usage_callback: F,
     ) -> anyhow::Result<BoxStream<'async_trait, anyhow::Result<Event>>>
     where
@@ -93,12 +94,13 @@ impl V1MessagesProvider for BedrockV1MessagesProvider {
     async fn v1_messages_stream<F>(
         self,
         request: V1MessagesRequest,
+        response_model_id: Option<String>,
         usage_callback: F,
     ) -> anyhow::Result<BoxStream<'async_trait, anyhow::Result<Event>>>
     where
         F: Fn(&TokenUsage) + Send + Sync + 'static,
     {
-        let model = request.model.clone();
+        let model = response_model_id.unwrap_or_else(|| request.model.clone());
         let bedrock_chat_completion = crate::bedrock::BedrockChatCompletion::try_from(&request)?;
         info!(
             "Processed Anthropic request to Bedrock format with {} messages",
