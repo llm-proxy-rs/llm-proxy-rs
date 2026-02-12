@@ -7,7 +7,7 @@ edition = "2024"
 anyhow = "1.0.101"
 anthropic-request = { path = "../anthropic-request" }
 anthropic-response = { path = "../anthropic-response" }
-aws-sdk-bedrockruntime = "1.124.0"
+aws-sdk-bedrockruntime = "1.125.0"
 axum = "0.8.8"
 chat = { path = "../chat" }
 common = { path = "../common" }

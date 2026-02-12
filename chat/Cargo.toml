@@ -9,9 +9,9 @@ anthropic-request = { path = "../anthropic-request" }
 anthropic-response = { path = "../anthropic-response" }
 async-stream = "0.3.6"
 async-trait = "0.1.89"
-aws-config = "1.8.13"
-aws-sdk-bedrockruntime = "1.124.0"
-aws-smithy-types = "1.4.3"
+aws-config = "1.8.14"
+aws-sdk-bedrockruntime = "1.125.0"
+aws-smithy-types = "1.4.4"
 axum = "0.8.8"
 chrono = "0.4.43"
 futures = "0.3.31"
