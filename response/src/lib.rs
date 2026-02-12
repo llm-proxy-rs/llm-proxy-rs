@@ -13,8 +13,6 @@ pub struct ChatCompletionsResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub model: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub object: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub usage: Option<Usage>,
@@ -79,7 +77,6 @@ pub struct ChatCompletionsResponseBuilder {
     choices: Vec<Choice>,
     created: Option<i64>,
     id: Option<String>,
-    model: Option<String>,
     object: Option<String>,
     usage: Option<Usage>,
 }
@@ -100,11 +97,6 @@ impl ChatCompletionsResponseBuilder {
         self
     }
 
-    pub fn model(mut self, model: Option<String>) -> Self {
-        self.model = model;
-        self
-    }
-
     pub fn object(mut self, object: Option<String>) -> Self {
         self.object = object;
         self
@@ -120,7 +112,6 @@ impl ChatCompletionsResponseBuilder {
             choices: self.choices,
             created: self.created,
             id: self.id,
-            model: self.model,
             object: self.object,
             usage: self.usage,
         }
