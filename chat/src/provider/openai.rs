@@ -1,4 +1,5 @@
 use crate::{DONE_MESSAGE, create_sse_event};
+use anyhow::{anyhow, bail};
 use async_trait::async_trait;
 use aws_sdk_bedrockruntime::Client;
 use aws_sdk_bedrockruntime::primitives::event_stream::EventReceiver;
@@ -19,7 +20,7 @@ use uuid::Uuid;
 use crate::bedrock::ReasoningEffortToThinkingBudgetTokens;
 use crate::bedrock::openai::process_chat_completions_request_to_bedrock_chat_completion;
 
-const SEND_TIMEOUT: Duration = Duration::from_secs(30);
+const TX_EVENT_SEND_TIMEOUT: Duration = Duration::from_secs(30);
 
 fn process_bedrock_stream(
     mut stream: EventReceiver<
@@ -30,7 +31,7 @@ fn process_bedrock_stream(
     created: i64,
     usage_callback: Arc<dyn Fn(&TokenUsage) + Send + Sync>,
 ) -> BoxStream<'static, anyhow::Result<Event>> {
-    let (tx, rx) = mpsc::channel::<anyhow::Result<Event>>(1);
+    let (tx_event, rx_event) = mpsc::channel::<anyhow::Result<Event>>(1);
 
     tokio::spawn(async move {
         loop {
@@ -46,7 +47,7 @@ fn process_bedrock_stream(
                         let response = builder.id(Some(id.clone())).created(Some(created)).build();
 
                         let sse_event = create_sse_event(&response);
-                        match timeout(SEND_TIMEOUT, tx.send(sse_event)).await {
+                        match timeout(TX_EVENT_SEND_TIMEOUT, tx_event.send(sse_event)).await {
                             Ok(Ok(())) => {}
                             Ok(Err(_)) => {
                                 info!("SSE client disconnected, stopping Bedrock stream");
@@ -62,8 +63,8 @@ fn process_bedrock_stream(
                 Ok(None) => break,
                 Err(e) => {
                     let _ = timeout(
-                        SEND_TIMEOUT,
-                        tx.send(Err(anyhow::anyhow!("Stream receive error: {}", e))),
+                        TX_EVENT_SEND_TIMEOUT,
+                        tx_event.send(Err(anyhow!("Stream receive error: {}", e))),
                     )
                     .await;
                     break;
@@ -73,13 +74,13 @@ fn process_bedrock_stream(
 
         info!("Stream finished, sending DONE message");
         let _ = timeout(
-            SEND_TIMEOUT,
-            tx.send(Ok(Event::default().data(DONE_MESSAGE))),
+            TX_EVENT_SEND_TIMEOUT,
+            tx_event.send(Ok(Event::default().data(DONE_MESSAGE))),
         )
         .await;
     });
 
-    ReceiverStream::new(rx).boxed()
+    ReceiverStream::new(rx_event).boxed()
 }
 
 #[async_trait]
@@ -156,7 +157,7 @@ impl ChatCompletionsProvider for BedrockChatCompletionsProvider {
             }
             Err(e) => {
                 tracing::error!("Bedrock API error: {:?}", e);
-                return Err(anyhow::anyhow!("Bedrock API error: {}", e));
+                bail!("Bedrock API error: {}", e)
             }
         };
 

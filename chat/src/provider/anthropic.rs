@@ -2,6 +2,7 @@ use anthropic_request::{
     V1MessagesCountTokensRequest, V1MessagesRequest, tools_to_tool_configuration,
 };
 use anthropic_response::EventConverter;
+use anyhow::{anyhow, bail};
 use async_trait::async_trait;
 use aws_sdk_bedrockruntime::Client;
 use aws_sdk_bedrockruntime::primitives::event_stream::EventReceiver;
@@ -43,7 +44,7 @@ fn process_bedrock_stream(
                                 for (event_name, event) in events {
                                     let sse_event = match serde_json::to_string(&event) {
                                         Ok(json) => Ok(Event::default().event(event_name).data(json)),
-                                        Err(e) => Err(anyhow::anyhow!("Failed to serialize event: {}", e)),
+                                        Err(e) => Err(anyhow!("Failed to serialize event: {}", e)),
                                     };
                                     match timeout(TX_EVENT_SEND_TIMEOUT, tx_event.send(sse_event)).await {
                                         Ok(Ok(())) => {}
@@ -62,7 +63,7 @@ fn process_bedrock_stream(
                         Ok(None) => break,
                         Err(e) => {
                             let _ = timeout(TX_EVENT_SEND_TIMEOUT, tx_event
-                                .send(Err(anyhow::anyhow!("Stream receive error: {}", e))))
+                                .send(Err(anyhow!("Stream receive error: {}", e))))
                                 .await;
                             break;
                         }
@@ -172,7 +173,7 @@ impl V1MessagesProvider for BedrockV1MessagesProvider {
             }
             Err(e) => {
                 error!("Bedrock API error: {:?}", e);
-                Err(anyhow::anyhow!("Bedrock API error: {}", e))
+                bail!("Bedrock API error: {}", e)
             }
         }
     }
@@ -227,7 +228,7 @@ impl V1MessagesProvider for BedrockV1MessagesProvider {
             Ok(response) => Ok(response.input_tokens),
             Err(e) => {
                 error!("Bedrock API error: {:?}", e);
-                Err(anyhow::anyhow!("Bedrock API error: {}", e))
+                bail!("Bedrock API error: {}", e)
             }
         }
     }

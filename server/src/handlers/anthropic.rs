@@ -1,5 +1,6 @@
 use anthropic_request::{V1MessagesCountTokensRequest, V1MessagesRequest};
 use anthropic_response::V1MessagesCountTokensResponse;
+use anyhow::anyhow;
 use axum::{
     Json,
     extract::State,
@@ -23,7 +24,7 @@ pub async fn v1_messages(
 
     if payload.stream == Some(false) {
         error!("Stream is set to false");
-        return Err(anyhow::anyhow!("Stream is set to false").into());
+        return Err(anyhow!("Stream is set to false").into());
     }
 
     let stream = BedrockV1MessagesProvider::new(state.bedrockruntime_client.clone())
