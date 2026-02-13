@@ -1,6 +1,6 @@
 use crate::{DONE_MESSAGE, create_sse_event};
+use anyhow::{anyhow, bail};
 use async_trait::async_trait;
-use aws_config::BehaviorVersion;
 use aws_sdk_bedrockruntime::Client;
 use aws_sdk_bedrockruntime::primitives::event_stream::EventReceiver;
 use aws_sdk_bedrockruntime::types::{TokenUsage, error::ConverseStreamOutputError};
@@ -10,11 +10,17 @@ use futures::stream::{BoxStream, StreamExt};
 use request::ChatCompletionsRequest;
 use response::converse_stream_output_to_chat_completions_response_builder;
 use std::sync::Arc;
-use tracing::info;
+use std::time::Duration;
+use tokio::sync::mpsc;
+use tokio::time::timeout;
+use tokio_stream::wrappers::ReceiverStream;
+use tracing::{error, info};
 use uuid::Uuid;
 
 use crate::bedrock::ReasoningEffortToThinkingBudgetTokens;
 use crate::bedrock::openai::process_chat_completions_request_to_bedrock_chat_completion;
+
+const EVENT_TX_SEND_TIMEOUT: Duration = Duration::from_secs(30);
 
 fn process_bedrock_stream(
     mut stream: EventReceiver<
@@ -25,44 +31,56 @@ fn process_bedrock_stream(
     created: i64,
     usage_callback: Arc<dyn Fn(&TokenUsage) + Send + Sync>,
 ) -> BoxStream<'static, anyhow::Result<Event>> {
-    let stream = async_stream::stream! {
+    let (event_tx, event_rx) = mpsc::channel::<anyhow::Result<Event>>(1);
+
+    tokio::spawn(async move {
         loop {
             match stream.recv().await {
                 Ok(Some(output)) => {
                     let usage_callback = usage_callback.clone();
-                    if let Some(builder) = converse_stream_output_to_chat_completions_response_builder(&output, usage_callback) {
-                        let response = builder
-                            .id(Some(id.clone()))
-                            .created(Some(created))
-                            .build();
+                    if let Some(builder) =
+                        converse_stream_output_to_chat_completions_response_builder(
+                            &output,
+                            usage_callback,
+                        )
+                    {
+                        let response = builder.id(Some(id.clone())).created(Some(created)).build();
 
-                        match create_sse_event(&response) {
-                            Ok(event) => {
-                                yield Ok(event);
-                            },
-                            Err(e) => {
-                                yield Err(e);
+                        let sse_event = create_sse_event(&response);
+                        match timeout(EVENT_TX_SEND_TIMEOUT, event_tx.send(sse_event)).await {
+                            Ok(Ok(())) => {}
+                            Ok(Err(_)) => {
+                                info!("SSE client disconnected, stopping Bedrock stream");
+                                return;
+                            }
+                            Err(_) => {
+                                error!("Channel send timed out, consumer likely stuck");
+                                return;
                             }
                         }
                     }
                 }
-                Ok(None) => {
-                    break;
-                }
+                Ok(None) => break,
                 Err(e) => {
-                    yield Err(anyhow::anyhow!(
-                        "Stream receive error: {}",
-                        e
-                    ));
+                    let _ = timeout(
+                        EVENT_TX_SEND_TIMEOUT,
+                        event_tx.send(Err(anyhow!("Stream receive error: {}", e))),
+                    )
+                    .await;
+                    break;
                 }
             }
         }
 
         info!("Stream finished, sending DONE message");
-        yield Ok(Event::default().data(DONE_MESSAGE));
-    };
+        let _ = timeout(
+            EVENT_TX_SEND_TIMEOUT,
+            event_tx.send(Ok(Event::default().data(DONE_MESSAGE))),
+        )
+        .await;
+    });
 
-    stream.boxed()
+    ReceiverStream::new(event_rx).boxed()
 }
 
 #[async_trait]
@@ -77,11 +95,15 @@ pub trait ChatCompletionsProvider {
         F: Fn(&TokenUsage) + Send + Sync + 'static;
 }
 
-pub struct BedrockChatCompletionsProvider {}
+pub struct BedrockChatCompletionsProvider {
+    bedrockruntime_client: Client,
+}
 
 impl BedrockChatCompletionsProvider {
-    pub async fn new() -> Self {
-        Self {}
+    pub fn new(bedrockruntime_client: Client) -> Self {
+        Self {
+            bedrockruntime_client,
+        }
     }
 }
 
@@ -108,15 +130,13 @@ impl ChatCompletionsProvider for BedrockChatCompletionsProvider {
                 .map_or(0, |m| m.len())
         );
 
-        let config = aws_config::load_defaults(BehaviorVersion::latest()).await;
-        let client = Client::new(&config);
-
         info!(
             "Sending OpenAI request to Bedrock API for model: {}",
             bedrock_chat_completion.model_id
         );
 
-        let converse_builder = client
+        let converse_builder = self
+            .bedrockruntime_client
             .converse_stream()
             .model_id(&bedrock_chat_completion.model_id)
             .set_system(bedrock_chat_completion.system_content_blocks)
@@ -137,7 +157,7 @@ impl ChatCompletionsProvider for BedrockChatCompletionsProvider {
             }
             Err(e) => {
                 tracing::error!("Bedrock API error: {:?}", e);
-                return Err(anyhow::anyhow!("Bedrock API error: {}", e));
+                bail!("Bedrock API error: {}", e)
             }
         };
 
