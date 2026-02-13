@@ -25,8 +25,7 @@ pub async fn chat_completions(
         return Err(anyhow::anyhow!("Stream is set to false").into());
     }
 
-    let stream = BedrockChatCompletionsProvider::new()
-        .await
+    let stream = BedrockChatCompletionsProvider::new(state.bedrockruntime_client.clone())
         .chat_completions_stream(
             payload,
             state.reasoning_effort_to_thinking_budget_tokens,

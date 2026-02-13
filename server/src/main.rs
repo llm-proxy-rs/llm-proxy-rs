@@ -1,3 +1,5 @@
+use aws_config::BehaviorVersion;
+use aws_sdk_bedrockruntime::Client;
 use axum::{Router, routing::post};
 use chat::bedrock::ReasoningEffortToThinkingBudgetTokens;
 use config::{Config, File};
@@ -12,6 +14,7 @@ use handlers::anthropic::{v1_messages, v1_messages_count_tokens};
 use handlers::openai::chat_completions;
 
 pub struct AppState {
+    pub bedrockruntime_client: Client,
     pub reasoning_effort_to_thinking_budget_tokens: ReasoningEffortToThinkingBudgetTokens,
     pub inference_profile_prefixes: Vec<String>,
 }
@@ -69,7 +72,12 @@ async fn main() -> anyhow::Result<()> {
         load_config().await?;
     info!("Starting server on {}:{}", host, port);
 
+    let config = aws_config::load_defaults(BehaviorVersion::latest()).await;
+    let bedrockruntime_client = Client::new(&config);
+    info!("AWS Bedrock client initialized");
+
     let state = Arc::new(AppState {
+        bedrockruntime_client,
         reasoning_effort_to_thinking_budget_tokens,
         inference_profile_prefixes,
     });
