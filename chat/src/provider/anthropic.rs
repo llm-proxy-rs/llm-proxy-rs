@@ -20,7 +20,7 @@ use tracing::{error, info};
 use uuid::Uuid;
 
 const PING_INTERVAL: Duration = Duration::from_secs(20);
-const SEND_TIMEOUT: Duration = Duration::from_secs(30);
+const TX_EVENT_SEND_TIMEOUT: Duration = Duration::from_secs(30);
 
 fn process_bedrock_stream(
     mut stream: EventReceiver<ConverseStreamOutput, ConverseStreamOutputError>,
@@ -28,7 +28,7 @@ fn process_bedrock_stream(
     usage_callback: Arc<dyn Fn(&TokenUsage) + Send + Sync>,
 ) -> BoxStream<'static, anyhow::Result<Event>> {
     let id = format!("msg_{}", Uuid::new_v4());
-    let (tx, rx) = mpsc::channel::<anyhow::Result<Event>>(1);
+    let (tx_event, rx_event) = mpsc::channel::<anyhow::Result<Event>>(1);
 
     tokio::spawn(async move {
         let mut event_converter = EventConverter::new(id, model, usage_callback);
@@ -45,7 +45,7 @@ fn process_bedrock_stream(
                                         Ok(json) => Ok(Event::default().event(event_name).data(json)),
                                         Err(e) => Err(anyhow::anyhow!("Failed to serialize event: {}", e)),
                                     };
-                                    match timeout(SEND_TIMEOUT, tx.send(sse_event)).await {
+                                    match timeout(TX_EVENT_SEND_TIMEOUT, tx_event.send(sse_event)).await {
                                         Ok(Ok(())) => {}
                                         Ok(Err(_)) => {
                                             info!("SSE client disconnected, stopping Bedrock stream");
@@ -61,7 +61,7 @@ fn process_bedrock_stream(
                         }
                         Ok(None) => break,
                         Err(e) => {
-                            let _ = timeout(SEND_TIMEOUT, tx
+                            let _ = timeout(TX_EVENT_SEND_TIMEOUT, tx_event
                                 .send(Err(anyhow::anyhow!("Stream receive error: {}", e))))
                                 .await;
                             break;
@@ -71,7 +71,7 @@ fn process_bedrock_stream(
                 _ = ping_interval.tick() => {
                     info!("Sending ping event");
                     let ping = Ok(Event::default().event("ping").data(r#"{"type": "ping"}"#));
-                    match timeout(SEND_TIMEOUT, tx.send(ping)).await {
+                    match timeout(TX_EVENT_SEND_TIMEOUT, tx_event.send(ping)).await {
                         Ok(Ok(())) => {}
                         Ok(Err(_)) => {
                             info!("SSE client disconnected, stopping Bedrock stream");
@@ -88,7 +88,7 @@ fn process_bedrock_stream(
         info!("Bedrock stream finished");
     });
 
-    ReceiverStream::new(rx).boxed()
+    ReceiverStream::new(rx_event).boxed()
 }
 
 #[async_trait]
