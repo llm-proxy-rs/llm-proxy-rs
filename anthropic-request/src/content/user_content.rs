@@ -45,7 +45,7 @@ impl TryFrom<&UserContents> for Vec<ContentBlock> {
             UserContents::String(s) => Ok(vec![ContentBlock::Text(s.clone())]),
             UserContents::Array(arr) => Ok(arr
                 .iter()
-                .map(Option::<Vec<ContentBlock>>::try_from)
+                .map(Option::<Vec<_>>::try_from)
                 .collect::<Result<Vec<_>, _>>()?
                 .into_iter()
                 .flatten()

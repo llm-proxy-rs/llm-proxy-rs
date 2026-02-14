@@ -41,7 +41,7 @@ impl TryFrom<&AssistantContents> for Vec<ContentBlock> {
             AssistantContents::Array(arr) => {
                 let all_content_blocks: Vec<_> = arr
                     .iter()
-                    .map(Vec::<_>::try_from)
+                    .map(Vec::try_from)
                     .collect::<Result<Vec<_>, _>>()?
                     .into_iter()
                     .flatten()
