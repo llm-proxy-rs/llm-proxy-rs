@@ -2,6 +2,8 @@ use serde::{Deserialize, Serialize};
 
 pub mod cache_control;
 pub mod content;
+pub mod document_source;
+pub mod image_source;
 pub mod message;
 pub mod system;
 pub mod thinking;
@@ -10,6 +12,8 @@ pub mod tool_result_content;
 
 pub use cache_control::*;
 pub use content::*;
+pub use document_source::*;
+pub use image_source::*;
 pub use message::*;
 pub use system::*;
 pub use thinking::*;

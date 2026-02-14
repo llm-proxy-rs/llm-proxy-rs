@@ -1,4 +1,5 @@
 use anthropic_request::{
+    AssistantContent, AssistantContents, Message, Messages, UserContent, UserContents,
     V1MessagesCountTokensRequest, V1MessagesRequest, tools_to_tool_configuration,
 };
 use anthropic_response::EventConverter;
@@ -7,8 +8,8 @@ use async_trait::async_trait;
 use aws_sdk_bedrockruntime::Client;
 use aws_sdk_bedrockruntime::primitives::event_stream::EventReceiver;
 use aws_sdk_bedrockruntime::types::{
-    ConverseStreamOutput, ConverseTokensRequest, CountTokensInput, Message, SystemContentBlock,
-    TokenUsage, error::ConverseStreamOutputError,
+    ContentBlock, ConverseStreamOutput, ConverseTokensRequest, CountTokensInput,
+    Message as BedrockMessage, SystemContentBlock, TokenUsage, error::ConverseStreamOutputError,
 };
 use aws_smithy_types::Document;
 use axum::response::sse::Event;
@@ -110,6 +111,86 @@ pub trait V1MessagesProvider {
     ) -> anyhow::Result<i32>;
 }
 
+fn log_v1_messages_request(request: &V1MessagesRequest) {
+    match &request.messages {
+        Messages::String(s) => {
+            info!(
+                "V1 Messages Request: single string message, len={}",
+                s.len()
+            );
+        }
+        Messages::Array(messages) => {
+            for (i, message) in messages.iter().enumerate() {
+                match message {
+                    Message::User { content } => {
+                        let user_content_types = match content {
+                            UserContents::String(s) => format!("String(len={})", s.len()),
+                            UserContents::Array(arr) => arr
+                                .iter()
+                                .map(|c| match c {
+                                    UserContent::Document { .. } => "Document",
+                                    UserContent::Image { .. } => "Image",
+                                    UserContent::Text { .. } => "Text",
+                                    UserContent::ToolResult { .. } => "ToolResult",
+                                })
+                                .collect::<Vec<_>>()
+                                .join(", "),
+                        };
+                        info!(
+                            "V1 Messages Request Message {}: role=user, content=[{}]",
+                            i, user_content_types
+                        );
+                    }
+                    Message::Assistant { content } => {
+                        let assistant_content_types = match content {
+                            AssistantContents::String(s) => format!("String(len={})", s.len()),
+                            AssistantContents::Array(arr) => arr
+                                .iter()
+                                .map(|c| match c {
+                                    AssistantContent::Text { .. } => "Text",
+                                    AssistantContent::Thinking { .. } => "Thinking",
+                                    AssistantContent::ToolUse { .. } => "ToolUse",
+                                })
+                                .collect::<Vec<_>>()
+                                .join(", "),
+                        };
+                        info!(
+                            "V1 Messages Request Message {}: role=assistant, content=[{}]",
+                            i, assistant_content_types
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn log_bedrock_messages(messages: &[BedrockMessage]) {
+    for (i, message) in messages.iter().enumerate() {
+        let content_block_types = message
+            .content()
+            .iter()
+            .map(|content_block| match content_block {
+                ContentBlock::Document(_) => "Document",
+                ContentBlock::GuardContent(_) => "GuardContent",
+                ContentBlock::Image(_) => "Image",
+                ContentBlock::ReasoningContent(_) => "ReasoningContent",
+                ContentBlock::Text(_) => "Text",
+                ContentBlock::ToolResult(_) => "ToolResult",
+                ContentBlock::ToolUse(_) => "ToolUse",
+                _ => "Unknown",
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        info!(
+            "Bedrock Message {}: role={:?}, content=[{}]",
+            i,
+            message.role(),
+            content_block_types
+        );
+    }
+}
+
 pub struct BedrockV1MessagesProvider {
     bedrockruntime_client: Client,
 }
@@ -134,7 +215,11 @@ impl V1MessagesProvider for BedrockV1MessagesProvider {
         F: Fn(&TokenUsage) + Send + Sync + 'static,
     {
         let model = response_model_id.unwrap_or_else(|| request.model.clone());
+        log_v1_messages_request(&request);
         let bedrock_chat_completion = crate::bedrock::BedrockChatCompletion::try_from(&request)?;
+        if let Some(messages) = &bedrock_chat_completion.messages {
+            log_bedrock_messages(messages);
+        }
         info!(
             "Processed Anthropic request to Bedrock format with {} messages",
             bedrock_chat_completion
@@ -183,7 +268,7 @@ impl V1MessagesProvider for BedrockV1MessagesProvider {
         request: &V1MessagesCountTokensRequest,
         inference_profile_prefixes: &[String],
     ) -> anyhow::Result<i32> {
-        let messages: Option<Vec<Message>> = Option::try_from(&request.messages)?;
+        let messages: Option<Vec<BedrockMessage>> = Option::try_from(&request.messages)?;
 
         let system: Option<Vec<SystemContentBlock>> = request
             .system
