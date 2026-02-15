@@ -48,9 +48,9 @@ impl From<&Contents> for Vec<ToolResultContentBlock> {
                 .iter()
                 .filter_map(|c| match c {
                     Content::Text { text } => Some(ToolResultContentBlock::Text(text.clone())),
-                    Content::ImageUrl { image_url } => {
-                        Option::<ImageBlock>::from(image_url).map(ToolResultContentBlock::Image)
-                    }
+                    Content::ImageUrl { image_url } => ImageBlock::try_from(image_url)
+                        .ok()
+                        .map(ToolResultContentBlock::Image),
                 })
                 .collect(),
         }

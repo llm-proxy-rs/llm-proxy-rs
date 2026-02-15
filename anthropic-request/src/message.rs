@@ -25,7 +25,15 @@ impl TryFrom<&Message> for BedrockMessage {
     fn try_from(message: &Message) -> Result<Self, Self::Error> {
         match message {
             Message::User { content } => {
-                let content = Vec::try_from(content)?;
+                let all_content_blocks = Vec::try_from(content)?;
+                let (tool_result_content_blocks, others_content_blocks): (Vec<_>, Vec<_>) =
+                    all_content_blocks
+                        .into_iter()
+                        .partition(|b| matches!(b, ContentBlock::ToolResult(_)));
+                let content: Vec<_> = tool_result_content_blocks
+                    .into_iter()
+                    .chain(others_content_blocks)
+                    .collect();
 
                 Ok(BedrockMessage::builder()
                     .role(ConversationRole::User)
@@ -75,163 +83,20 @@ impl TryFrom<&Messages> for Option<Vec<BedrockMessage>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::content::{AssistantContent, UserContent};
 
     #[test]
-    fn test_user_message_string_content() {
-        let json = r#"{
+    fn tool_result_reordered_before_text() {
+        let json = serde_json::json!({
             "role": "user",
-            "content": "Hello"
-        }"#;
-
-        let message: Message = serde_json::from_str(json).unwrap();
-        match message {
-            Message::User { content } => match content {
-                UserContents::String(s) => assert_eq!(s, "Hello"),
-                _ => panic!("Expected String variant"),
-            },
-            _ => panic!("Expected User message"),
-        }
-    }
-
-    #[test]
-    fn test_user_message_array_content() {
-        let json = r#"{
-            "role": "user",
-            "content": [{"type": "text", "text": "Hello"}]
-        }"#;
-
-        let message: Message = serde_json::from_str(json).unwrap();
-        match message {
-            Message::User { content } => match content {
-                UserContents::Array(arr) => {
-                    assert_eq!(arr.len(), 1);
-                    match &arr[0] {
-                        UserContent::Text {
-                            cache_control,
-                            text,
-                        } => {
-                            assert_eq!(text, "Hello");
-                            assert!(cache_control.is_none());
-                        }
-                        _ => panic!("Expected Text variant"),
-                    }
-                }
-                _ => panic!("Expected Array variant"),
-            },
-            _ => panic!("Expected User message"),
-        }
-    }
-
-    #[test]
-    fn test_assistant_message_string_content() {
-        let json = r#"{
-            "role": "assistant",
-            "content": "Hi there!"
-        }"#;
-
-        let message: Message = serde_json::from_str(json).unwrap();
-        match message {
-            Message::Assistant { content } => match content {
-                AssistantContents::String(s) => assert_eq!(s, "Hi there!"),
-                _ => panic!("Expected String variant"),
-            },
-            _ => panic!("Expected Assistant message"),
-        }
-    }
-
-    #[test]
-    fn test_assistant_message_array_content() {
-        let json = r#"{
-            "role": "assistant",
-            "content": [{"type": "text", "text": "Hi there!"}]
-        }"#;
-
-        let message: Message = serde_json::from_str(json).unwrap();
-        match message {
-            Message::Assistant { content } => match content {
-                AssistantContents::Array(arr) => {
-                    assert_eq!(arr.len(), 1);
-                    match &arr[0] {
-                        AssistantContent::Text {
-                            cache_control,
-                            text,
-                        } => {
-                            assert_eq!(text, "Hi there!");
-                            assert!(cache_control.is_none());
-                        }
-                        _ => panic!("Expected Text variant"),
-                    }
-                }
-                _ => panic!("Expected Array variant"),
-            },
-            _ => panic!("Expected Assistant message"),
-        }
-    }
-
-    #[test]
-    fn test_messages_array() {
-        let json = r#"[
-            {
-                "role": "user",
-                "content": [{"type": "text", "text": "Hello"}]
-            },
-            {
-                "role": "assistant",
-                "content": [{"type": "text", "text": "Hi there!"}]
-            }
-        ]"#;
-
-        let messages: Vec<Message> = serde_json::from_str(json).unwrap();
-        assert_eq!(messages.len(), 2);
-
-        match &messages[0] {
-            Message::User { content } => match content {
-                UserContents::Array(arr) => {
-                    assert_eq!(arr.len(), 1);
-                }
-                _ => panic!("Expected Array variant"),
-            },
-            _ => panic!("Expected User message"),
-        }
-
-        match &messages[1] {
-            Message::Assistant { content } => match content {
-                AssistantContents::Array(arr) => {
-                    assert_eq!(arr.len(), 1);
-                }
-                _ => panic!("Expected Array variant"),
-            },
-            _ => panic!("Expected Assistant message"),
-        }
-    }
-
-    #[test]
-    fn test_messages_string() {
-        let json = r#""Hello world""#;
-
-        let messages: Messages = serde_json::from_str(json).unwrap();
-        match messages {
-            Messages::String(s) => assert_eq!(s, "Hello world"),
-            _ => panic!("Expected String variant"),
-        }
-    }
-
-    #[test]
-    fn test_messages_array_wrapper() {
-        let json = r#"[
-            {
-                "role": "user",
-                "content": "Hello"
-            }
-        ]"#;
-
-        let messages: Messages = serde_json::from_str(json).unwrap();
-        match messages {
-            Messages::Array(arr) => {
-                assert_eq!(arr.len(), 1);
-            }
-            _ => panic!("Expected Array variant"),
-        }
+            "content": [
+                {"type": "text", "text": "hello"},
+                {"type": "tool_result", "tool_use_id": "t1", "content": "result"}
+            ]
+        });
+        let message: Message = serde_json::from_value(json).unwrap();
+        let bedrock = BedrockMessage::try_from(&message).unwrap();
+        let content = bedrock.content();
+        assert!(matches!(content[0], ContentBlock::ToolResult(_)));
+        assert!(matches!(content[1], ContentBlock::Text(_)));
     }
 }

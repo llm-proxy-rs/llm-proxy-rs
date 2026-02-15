@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 pub struct Message {
     pub content: Vec<serde_json::Value>,
     pub id: String,
@@ -13,7 +13,7 @@ pub struct Message {
     pub usage: Usage,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 pub struct Usage {
     pub input_tokens: i32,
     pub output_tokens: i32,
@@ -34,7 +34,7 @@ pub struct MessageBuilder {
     stop_reason: Option<String>,
     stop_sequence: Option<String>,
     message_type: String,
-    usage: Option<Usage>,
+    usage: Usage,
 }
 
 impl MessageBuilder {
@@ -74,7 +74,7 @@ impl MessageBuilder {
     }
 
     pub fn usage(mut self, usage: Usage) -> Self {
-        self.usage = Some(usage);
+        self.usage = usage;
         self
     }
 
@@ -87,10 +87,7 @@ impl MessageBuilder {
             stop_reason: self.stop_reason,
             stop_sequence: self.stop_sequence,
             message_type: self.message_type,
-            usage: self.usage.unwrap_or(Usage {
-                input_tokens: 0,
-                output_tokens: 0,
-            }),
+            usage: self.usage,
         }
     }
 }
@@ -123,5 +120,23 @@ impl UsageBuilder {
             input_tokens: self.input_tokens,
             output_tokens: self.output_tokens,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn message_builder_defaults_usage_to_zero() {
+        let message = Message::builder()
+            .id("msg_1".to_string())
+            .model("claude".to_string())
+            .role("assistant".to_string())
+            .message_type("message".to_string())
+            .build();
+
+        assert_eq!(message.usage.input_tokens, 0);
+        assert_eq!(message.usage.output_tokens, 0);
     }
 }

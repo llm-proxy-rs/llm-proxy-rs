@@ -49,7 +49,10 @@ impl TryFrom<&Message> for Option<Vec<ContentBlock>> {
             } => Ok(Some(
                 contents
                     .iter()
-                    .flat_map(Vec::<ContentBlock>::from)
+                    .map(Vec::<ContentBlock>::try_from)
+                    .collect::<Result<Vec<_>, _>>()?
+                    .into_iter()
+                    .flatten()
                     .chain(
                         tool_calls
                             .iter()
@@ -61,7 +64,10 @@ impl TryFrom<&Message> for Option<Vec<ContentBlock>> {
                     )
                     .collect::<Vec<_>>(),
             )),
-            Message::User { contents } => Ok(contents.as_ref().map(|contents| contents.into())),
+            Message::User { contents } => Ok(contents
+                .as_ref()
+                .map(Vec::<ContentBlock>::try_from)
+                .transpose()?),
             Message::System { .. } => unreachable!(),
         }
     }

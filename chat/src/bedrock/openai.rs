@@ -96,5 +96,6 @@ pub fn process_chat_completions_request_to_bedrock_chat_completion(
         tool_config,
         inference_config,
         additional_model_request_fields,
+        output_config: None,
     })
 }
