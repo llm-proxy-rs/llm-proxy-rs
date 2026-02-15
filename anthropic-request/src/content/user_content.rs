@@ -73,15 +73,15 @@ impl TryFrom<&UserContent> for Option<Vec<ContentBlock>> {
 
                 Ok(Some(blocks))
             }
-            UserContent::Image { source } => Ok(Option::<ImageBlock>::from(source)
-                .map(|image_block| vec![ContentBlock::Image(image_block)])),
+            UserContent::Image { source } => Ok(Some(vec![ContentBlock::Image(
+                ImageBlock::try_from(source)?,
+            )])),
             UserContent::Document { source } => {
-                Ok(Option::<DocumentBlock>::from(source).map(|document_block| {
-                    vec![
-                        ContentBlock::Document(document_block),
-                        ContentBlock::Text(" ".into()),
-                    ]
-                }))
+                let document_block = DocumentBlock::try_from(source)?;
+                Ok(Some(vec![
+                    ContentBlock::Document(document_block),
+                    ContentBlock::Text(" ".into()),
+                ]))
             }
             UserContent::ToolResult {
                 tool_use_id,
@@ -111,15 +111,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn unsupported_content_skipped_in_array() {
+    fn unsupported_content_returns_error() {
         let json = serde_json::json!([
             {"type": "text", "text": "hello"},
             {"type": "image", "source": {"type": "base64", "media_type": "image/bmp", "data": ""}}
         ]);
         let contents: UserContents = serde_json::from_value(json).unwrap();
-        let blocks = Vec::<ContentBlock>::try_from(&contents).unwrap();
-        assert_eq!(blocks.len(), 1);
-        assert!(matches!(blocks[0], ContentBlock::Text(_)));
+        assert!(Vec::<ContentBlock>::try_from(&contents).is_err());
     }
 
     #[test]

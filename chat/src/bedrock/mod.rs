@@ -1,5 +1,5 @@
 use aws_sdk_bedrockruntime::types::{
-    InferenceConfiguration, Message, SystemContentBlock, ToolConfiguration,
+    InferenceConfiguration, Message, OutputConfig, SystemContentBlock, ToolConfiguration,
 };
 use aws_smithy_types::Document;
 use serde::{Deserialize, Serialize};
@@ -31,4 +31,5 @@ pub struct BedrockChatCompletion {
     pub tool_config: Option<ToolConfiguration>,
     pub inference_config: InferenceConfiguration,
     pub additional_model_request_fields: Option<Document>,
+    pub output_config: Option<OutputConfig>,
 }

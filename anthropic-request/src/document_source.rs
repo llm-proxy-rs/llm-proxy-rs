@@ -1,3 +1,4 @@
+use anyhow::bail;
 use aws_sdk_bedrockruntime::types::{
     DocumentBlock, DocumentFormat, DocumentSource as BedrockDocumentSource,
 };
@@ -11,8 +12,10 @@ pub enum DocumentSource {
     Base64 { media_type: String, data: String },
 }
 
-impl From<&DocumentSource> for Option<DocumentBlock> {
-    fn from(source: &DocumentSource) -> Self {
+impl TryFrom<&DocumentSource> for DocumentBlock {
+    type Error = anyhow::Error;
+
+    fn try_from(source: &DocumentSource) -> Result<Self, Self::Error> {
         match source {
             DocumentSource::Base64 { media_type, data } => {
                 let format = match media_type.as_str() {
@@ -29,17 +32,16 @@ impl From<&DocumentSource> for Option<DocumentBlock> {
                     "text/html" => DocumentFormat::Html,
                     "text/markdown" => DocumentFormat::Md,
                     "text/plain" => DocumentFormat::Txt,
-                    _ => return None,
+                    _ => bail!("Unsupported document media type: {media_type}"),
                 };
 
-                let bytes = general_purpose::STANDARD.decode(data).ok()?;
+                let bytes = general_purpose::STANDARD.decode(data)?;
 
-                DocumentBlock::builder()
+                Ok(DocumentBlock::builder()
                     .format(format)
                     .name("document")
                     .source(BedrockDocumentSource::Bytes(bytes.into()))
-                    .build()
-                    .ok()
+                    .build()?)
             }
         }
     }
@@ -50,12 +52,21 @@ mod tests {
     use super::*;
 
     #[test]
-    fn unsupported_media_type_returns_none() {
+    fn unsupported_media_type_returns_error() {
         let source = DocumentSource::Base64 {
             media_type: "application/zip".into(),
             data: "".into(),
         };
-        assert!(Option::<DocumentBlock>::from(&source).is_none());
+        assert!(DocumentBlock::try_from(&source).is_err());
+    }
+
+    #[test]
+    fn invalid_base64_returns_error() {
+        let source = DocumentSource::Base64 {
+            media_type: "application/pdf".into(),
+            data: "!!!not-base64!!!".into(),
+        };
+        assert!(DocumentBlock::try_from(&source).is_err());
     }
 
     #[test]
@@ -65,7 +76,7 @@ mod tests {
             media_type: "application/pdf".into(),
             data,
         };
-        let block = Option::<DocumentBlock>::from(&source).unwrap();
+        let block = DocumentBlock::try_from(&source).unwrap();
         assert_eq!(*block.format(), DocumentFormat::Pdf);
     }
 }

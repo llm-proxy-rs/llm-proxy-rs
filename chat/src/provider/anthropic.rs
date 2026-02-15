@@ -243,7 +243,8 @@ impl V1MessagesProvider for BedrockV1MessagesProvider {
             .set_inference_config(Some(bedrock_chat_completion.inference_config))
             .set_additional_model_request_fields(
                 bedrock_chat_completion.additional_model_request_fields,
-            );
+            )
+            .set_output_config(bedrock_chat_completion.output_config);
 
         info!("About to send Anthropic request to Bedrock...");
         let result = converse_builder.send().await;

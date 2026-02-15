@@ -1,4 +1,3 @@
-use anyhow::Result;
 use aws_sdk_bedrockruntime::types::{ContentBlock, ImageBlock};
 use serde::{
     Deserialize, Serialize,
@@ -48,19 +47,22 @@ impl<'de> Visitor<'de> for Contents {
     }
 }
 
-impl From<&Contents> for Vec<ContentBlock> {
-    fn from(contents: &Contents) -> Self {
+impl TryFrom<&Contents> for Vec<ContentBlock> {
+    type Error = anyhow::Error;
+
+    fn try_from(contents: &Contents) -> Result<Self, Self::Error> {
         match contents {
             Contents::Array(a) => a
                 .iter()
-                .filter_map(|c| match c {
-                    Content::Text { text } => Some(ContentBlock::Text(text.clone())),
+                .map(|c| match c {
+                    Content::Text { text } => Ok(Some(ContentBlock::Text(text.clone()))),
                     Content::ImageUrl { image_url } => {
-                        Option::<ImageBlock>::from(image_url).map(ContentBlock::Image)
+                        Ok(Some(ContentBlock::Image(ImageBlock::try_from(image_url)?)))
                     }
                 })
-                .collect(),
-            Contents::String(s) => vec![ContentBlock::Text(s.clone())],
+                .collect::<Result<Vec<_>, _>>()
+                .map(|v| v.into_iter().flatten().collect()),
+            Contents::String(s) => Ok(vec![ContentBlock::Text(s.clone())]),
         }
     }
 }
