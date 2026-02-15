@@ -16,6 +16,14 @@ pub enum ContentBlockDelta {
     ThinkingDelta { thinking: String },
 }
 
+impl Default for ContentBlockDelta {
+    fn default() -> Self {
+        ContentBlockDelta::TextDelta {
+            text: String::new(),
+        }
+    }
+}
+
 pub fn bedrock_content_block_delta_to_content_block_delta(
     delta: &BedrockContentBlockDelta,
 ) -> Option<ContentBlockDelta> {

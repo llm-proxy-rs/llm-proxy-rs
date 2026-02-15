@@ -144,6 +144,15 @@ mod tests {
         assert!(map.contains_key("thinking"));
         assert!(map.contains_key("output_config"));
         assert!(map.contains_key("anthropic_beta"));
+
+        let Document::Object(thinking_map) = &map["thinking"] else {
+            panic!("expected thinking to be Document::Object");
+        };
+        assert_eq!(
+            thinking_map["type"],
+            Document::String("enabled".to_string())
+        );
+        assert_eq!(thinking_map["budget_tokens"], Document::from(1024));
     }
 
     #[test]

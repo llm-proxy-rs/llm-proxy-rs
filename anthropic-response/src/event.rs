@@ -57,13 +57,13 @@ impl Event {
 
 #[derive(Default)]
 pub struct ContentBlockDeltaEventBuilder {
-    delta: Option<ContentBlockDelta>,
+    delta: ContentBlockDelta,
     index: i32,
 }
 
 impl ContentBlockDeltaEventBuilder {
     pub fn delta(mut self, delta: ContentBlockDelta) -> Self {
-        self.delta = Some(delta);
+        self.delta = delta;
         self
     }
 
@@ -74,7 +74,7 @@ impl ContentBlockDeltaEventBuilder {
 
     pub fn build(self) -> Event {
         Event::ContentBlockDelta {
-            delta: self.delta.expect("delta is required"),
+            delta: self.delta,
             index: self.index,
         }
     }
@@ -82,13 +82,13 @@ impl ContentBlockDeltaEventBuilder {
 
 #[derive(Default)]
 pub struct ContentBlockStartEventBuilder {
-    content_block: Option<ContentBlock>,
+    content_block: ContentBlock,
     index: i32,
 }
 
 impl ContentBlockStartEventBuilder {
     pub fn content_block(mut self, content_block: ContentBlock) -> Self {
-        self.content_block = Some(content_block);
+        self.content_block = content_block;
         self
     }
 
@@ -99,7 +99,7 @@ impl ContentBlockStartEventBuilder {
 
     pub fn build(self) -> Event {
         Event::ContentBlockStart {
-            content_block: self.content_block.expect("content_block is required"),
+            content_block: self.content_block,
             index: self.index,
         }
     }
@@ -123,43 +123,43 @@ impl ContentBlockStopEventBuilder {
 
 #[derive(Default)]
 pub struct MessageDeltaEventBuilder {
-    delta: Option<MessageDeltaContent>,
-    usage: Option<UsageDelta>,
+    delta: MessageDeltaContent,
+    usage: UsageDelta,
 }
 
 impl MessageDeltaEventBuilder {
     pub fn delta(mut self, delta: MessageDeltaContent) -> Self {
-        self.delta = Some(delta);
+        self.delta = delta;
         self
     }
 
     pub fn usage(mut self, usage: UsageDelta) -> Self {
-        self.usage = Some(usage);
+        self.usage = usage;
         self
     }
 
     pub fn build(self) -> Event {
         Event::MessageDelta {
-            delta: self.delta.expect("delta is required"),
-            usage: self.usage.expect("usage is required"),
+            delta: self.delta,
+            usage: self.usage,
         }
     }
 }
 
 #[derive(Default)]
 pub struct MessageStartEventBuilder {
-    message: Option<Message>,
+    message: Message,
 }
 
 impl MessageStartEventBuilder {
     pub fn message(mut self, message: Message) -> Self {
-        self.message = Some(message);
+        self.message = message;
         self
     }
 
     pub fn build(self) -> Event {
         Event::MessageStart {
-            message: self.message.expect("message is required"),
+            message: self.message,
         }
     }
 }
@@ -177,6 +177,14 @@ pub enum ContentBlock {
         input: serde_json::Value,
         name: String,
     },
+}
+
+impl Default for ContentBlock {
+    fn default() -> Self {
+        ContentBlock::Text {
+            text: String::new(),
+        }
+    }
 }
 
 impl ContentBlock {
@@ -234,11 +242,20 @@ impl ThinkingBlockBuilder {
     }
 }
 
-#[derive(Default)]
 pub struct ToolUseBlockBuilder {
     id: String,
-    input: Option<serde_json::Value>,
+    input: serde_json::Value,
     name: String,
+}
+
+impl Default for ToolUseBlockBuilder {
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            input: serde_json::json!({}),
+            name: String::new(),
+        }
+    }
 }
 
 impl ToolUseBlockBuilder {
@@ -248,7 +265,7 @@ impl ToolUseBlockBuilder {
     }
 
     pub fn input(mut self, input: serde_json::Value) -> Self {
-        self.input = Some(input);
+        self.input = input;
         self
     }
 
@@ -260,19 +277,38 @@ impl ToolUseBlockBuilder {
     pub fn build(self) -> ContentBlock {
         ContentBlock::ToolUse {
             id: self.id,
-            input: self.input.unwrap_or(serde_json::json!({})),
+            input: self.input,
             name: self.name,
         }
     }
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 pub struct MessageDeltaContent {
     pub stop_reason: Option<String>,
     pub stop_sequence: Option<String>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 pub struct UsageDelta {
     pub output_tokens: i32,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tool_use_builder_defaults_input_to_empty_object() {
+        let block = ContentBlock::tool_use_builder()
+            .id("id".to_string())
+            .name("name".to_string())
+            .build();
+
+        let ContentBlock::ToolUse { input, .. } = block else {
+            panic!("expected ToolUse");
+        };
+
+        assert_eq!(input, serde_json::json!({}));
+    }
 }
