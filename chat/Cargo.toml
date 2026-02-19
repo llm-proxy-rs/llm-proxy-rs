@@ -8,11 +8,11 @@ anyhow = "1.0.101"
 anthropic-request = { path = "../anthropic-request" }
 anthropic-response = { path = "../anthropic-response" }
 async-trait = "0.1.89"
-aws-sdk-bedrockruntime = "1.125.0"
-aws-smithy-types = "1.4.4"
+aws-sdk-bedrockruntime = "1.126.0"
+aws-smithy-types = "1.4.5"
 axum = "0.8.8"
 chrono = "0.4.43"
-futures = "0.3.31"
+futures = "0.3.32"
 request = { path = "../request" }
 uuid = { version = "1.21.0", features = ["v4"] }
 response = { path = "../response" }
