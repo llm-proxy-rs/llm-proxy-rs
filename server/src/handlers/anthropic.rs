@@ -11,8 +11,8 @@ use chat::provider::{BedrockV1MessagesProvider, V1MessagesProvider};
 use std::sync::Arc;
 use tracing::{error, info};
 
-use crate::handlers::anthropic_beta::filter_anthropic_beta;
 use crate::{AppState, error::AppError, utils::usage_callback};
+use common::filter_anthropic_beta;
 
 pub async fn v1_messages(
     State(state): State<Arc<AppState>>,
