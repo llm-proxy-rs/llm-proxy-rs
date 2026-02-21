@@ -680,7 +680,9 @@ name = "common"
 version = "0.1.0"
 dependencies = [
  "aws-smithy-types",
+ "axum",
  "serde_json",
+ "tracing",
 ]
 
 [[package]]
