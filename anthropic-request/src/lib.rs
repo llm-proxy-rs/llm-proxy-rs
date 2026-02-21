@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 pub mod additional_model_request_fields;
+pub mod anthropic_beta;
 pub mod cache_control;
 pub mod content;
 pub mod document_source;

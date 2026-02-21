@@ -14,26 +14,6 @@ pub enum OutputConfig {
     Other(serde_json::Value),
 }
 
-pub fn get_anthropic_beta_document(anthropic_beta: &[String]) -> Option<Document> {
-    if anthropic_beta.is_empty() {
-        None
-    } else {
-        Some(Document::Object(
-            [(
-                "anthropic_beta".to_string(),
-                Document::Array(
-                    anthropic_beta
-                        .iter()
-                        .map(|s| Document::String(s.clone()))
-                        .collect(),
-                ),
-            )]
-            .into_iter()
-            .collect(),
-        ))
-    }
-}
-
 pub fn get_output_config_effort_document(effort: &str) -> Document {
     Document::Object(
         [(

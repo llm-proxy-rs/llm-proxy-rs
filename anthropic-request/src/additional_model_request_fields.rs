@@ -1,6 +1,8 @@
 use aws_smithy_types::Document;
 
-use crate::{OutputConfig, Thinking, output_config};
+use crate::anthropic_beta::get_anthropic_beta_document;
+use crate::output_config::get_output_config_effort_document;
+use crate::{OutputConfig, Thinking};
 
 pub fn get_additional_model_request_fields(
     thinking: Option<&Thinking>,
@@ -8,14 +10,11 @@ pub fn get_additional_model_request_fields(
     anthropic_beta: Option<&[String]>,
 ) -> Option<Document> {
     let output_config_effort_document = match output_config {
-        Some(OutputConfig::Effort { effort }) => {
-            Some(output_config::get_output_config_effort_document(effort))
-        }
+        Some(OutputConfig::Effort { effort }) => Some(get_output_config_effort_document(effort)),
         _ => None,
     };
 
-    let anthropic_beta_document =
-        anthropic_beta.and_then(output_config::get_anthropic_beta_document);
+    let anthropic_beta_document = anthropic_beta.and_then(get_anthropic_beta_document);
 
     [
         thinking.map(Document::from),
