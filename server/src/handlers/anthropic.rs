@@ -8,11 +8,11 @@ use axum::{
     response::{IntoResponse, sse::Sse},
 };
 use chat::provider::{BedrockV1MessagesProvider, V1MessagesProvider};
+use common::filter_anthropic_beta;
 use std::sync::Arc;
 use tracing::{error, info};
 
 use crate::{AppState, error::AppError, utils::usage_callback};
-use common::filter_anthropic_beta;
 
 pub async fn v1_messages(
     State(state): State<Arc<AppState>>,
