@@ -27,11 +27,7 @@ pub async fn chat_completions(
     }
 
     let stream = BedrockChatCompletionsProvider::new(state.bedrockruntime_client.clone())
-        .chat_completions_stream(
-            payload,
-            state.reasoning_effort_to_thinking_budget_tokens,
-            usage_callback,
-        )
+        .chat_completions_stream(payload, usage_callback)
         .await?;
 
     Ok((StatusCode::OK, Sse::new(stream)))

@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-anyhow = "1.0.101"
+anyhow = "1.0.102"
 anthropic-request = { path = "../anthropic-request" }
 anthropic-response = { path = "../anthropic-response" }
 aws-config = "1.8.14"
@@ -18,3 +18,8 @@ response = { path = "../response" }
 tokio = { version = "1.49.0", features = ["full"] }
 tracing = "0.1.44"
 tracing-subscriber = "0.3.22"
+
+[dev-dependencies]
+http-body-util = "0.1"
+serde_json = "1"
+tower = "0.5"

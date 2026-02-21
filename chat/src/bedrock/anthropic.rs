@@ -1,10 +1,10 @@
-use anthropic_request::{V1MessagesRequest, additional_model_request_fields};
+use anthropic_request::V1MessagesRequest;
 use anyhow::Result;
 use aws_sdk_bedrockruntime::types::{
     InferenceConfiguration, OutputConfig as BedrockOutputConfig, SystemContentBlock,
 };
 
-use super::BedrockChatCompletion;
+use crate::bedrock::BedrockChatCompletion;
 
 impl TryFrom<&V1MessagesRequest> for BedrockChatCompletion {
     type Error = anyhow::Error;
@@ -37,18 +37,12 @@ impl TryFrom<&V1MessagesRequest> for BedrockChatCompletion {
             .transpose()?
             .flatten();
 
-        let additional_model_request_fields = additional_model_request_fields(
-            request.thinking.as_ref(),
-            request.output_config.as_ref(),
-        );
-
         Ok(BedrockChatCompletion {
             model_id: request.model.clone(),
             messages,
             system_content_blocks,
             tool_config,
             inference_config,
-            additional_model_request_fields,
             output_config,
         })
     }

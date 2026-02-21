@@ -1,22 +1,28 @@
 use anthropic_request::{
     AssistantContent, AssistantContents, Message, Messages, UserContent, UserContents,
-    V1MessagesCountTokensRequest, V1MessagesRequest, tools_to_tool_configuration,
+    V1MessagesCountTokensRequest, V1MessagesRequest, get_additional_model_request_fields,
+    tools_to_tool_configuration,
 };
 use anthropic_response::EventConverter;
 use anyhow::{anyhow, bail};
 use async_trait::async_trait;
-use aws_sdk_bedrockruntime::Client;
-use aws_sdk_bedrockruntime::primitives::event_stream::EventReceiver;
-use aws_sdk_bedrockruntime::types::{
-    ContentBlock, ConverseStreamOutput, ConverseTokensRequest, CountTokensInput,
-    Message as BedrockMessage, SystemContentBlock, TokenUsage, error::ConverseStreamOutputError,
+use aws_sdk_bedrockruntime::{
+    Client,
+    primitives::event_stream::EventReceiver,
+    types::{
+        ContentBlock, ConverseStreamOutput, ConverseTokensRequest, CountTokensInput,
+        Message as BedrockMessage, SystemContentBlock, TokenUsage,
+        error::ConverseStreamOutputError,
+    },
 };
 use aws_smithy_types::Document;
 use axum::response::sse::Event;
 use futures::stream::{BoxStream, StreamExt};
 use std::{sync::Arc, time::Duration};
-use tokio::sync::mpsc;
-use tokio::time::{Instant, interval_at, timeout};
+use tokio::{
+    sync::mpsc,
+    time::{Instant, interval_at, timeout},
+};
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::{error, info};
 use uuid::Uuid;
@@ -99,6 +105,7 @@ pub trait V1MessagesProvider {
         self,
         request: V1MessagesRequest,
         response_model_id: Option<String>,
+        anthropic_beta: Option<Vec<String>>,
         usage_callback: F,
     ) -> anyhow::Result<BoxStream<'async_trait, anyhow::Result<Event>>>
     where
@@ -209,14 +216,20 @@ impl V1MessagesProvider for BedrockV1MessagesProvider {
         self,
         request: V1MessagesRequest,
         response_model_id: Option<String>,
+        anthropic_beta: Option<Vec<String>>,
         usage_callback: F,
     ) -> anyhow::Result<BoxStream<'async_trait, anyhow::Result<Event>>>
     where
         F: Fn(&TokenUsage) + Send + Sync + 'static,
     {
-        let model = response_model_id.unwrap_or_else(|| request.model.clone());
+        let model = response_model_id.unwrap_or(request.model.clone());
         log_v1_messages_request(&request);
         let bedrock_chat_completion = crate::bedrock::BedrockChatCompletion::try_from(&request)?;
+        let additional_model_request_fields = get_additional_model_request_fields(
+            request.thinking.as_ref(),
+            request.output_config.as_ref(),
+            anthropic_beta.as_deref(),
+        );
         if let Some(messages) = &bedrock_chat_completion.messages {
             log_bedrock_messages(messages);
         }
@@ -241,9 +254,7 @@ impl V1MessagesProvider for BedrockV1MessagesProvider {
             .set_messages(bedrock_chat_completion.messages)
             .set_tool_config(bedrock_chat_completion.tool_config)
             .set_inference_config(Some(bedrock_chat_completion.inference_config))
-            .set_additional_model_request_fields(
-                bedrock_chat_completion.additional_model_request_fields,
-            )
+            .set_additional_model_request_fields(additional_model_request_fields)
             .set_output_config(bedrock_chat_completion.output_config);
 
         info!("About to send Anthropic request to Bedrock...");

@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 
+pub mod additional_model_request_fields;
 pub mod cache_control;
 pub mod content;
 pub mod document_source;
@@ -11,6 +12,7 @@ pub mod thinking;
 pub mod tool;
 pub mod tool_result_content;
 
+pub use additional_model_request_fields::*;
 pub use cache_control::*;
 pub use content::*;
 pub use document_source::*;
