@@ -5,24 +5,11 @@ use aws_sdk_bedrockruntime::{
 };
 use axum::{http::StatusCode, response::IntoResponse};
 
-pub struct AppError(StatusCode, AnyhowError);
+pub struct AppError(StatusCode, String);
 
 impl IntoResponse for AppError {
     fn into_response(self) -> axum::response::Response {
-        let message = self
-            .1
-            .downcast_ref::<SdkError<ConverseStreamError>>()
-            .and_then(|e| e.as_service_error())
-            .and_then(|se| se.meta().message())
-            .or_else(|| {
-                self.1
-                    .downcast_ref::<SdkError<CountTokensError>>()
-                    .and_then(|e| e.as_service_error())
-                    .and_then(|se| se.meta().message())
-            })
-            .map(String::from)
-            .unwrap_or_else(|| self.1.to_string());
-        (self.0, message).into_response()
+        (self.0, self.1).into_response()
     }
 }
 
@@ -43,7 +30,17 @@ where
             })
             .and_then(|code| StatusCode::from_u16(code).ok())
             .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
-        Self(status, err)
+        let message = err
+            .downcast_ref::<SdkError<ConverseStreamError>>()
+            .and_then(|e| e.as_service_error())
+            .and_then(|se| se.meta().message())
+            .or_else(|| {
+                err.downcast_ref::<SdkError<CountTokensError>>()
+                    .and_then(|e| e.as_service_error())
+                    .and_then(|se| se.meta().message())
+            })
+            .map_or_else(|| err.to_string(), String::from);
+        Self(status, message)
     }
 }
 
