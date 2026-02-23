@@ -39,7 +39,8 @@ where
                     .and_then(|e| e.as_service_error())
                     .and_then(|se| se.meta().message())
             })
-            .map_or_else(|| err.to_string(), String::from);
+            .map(String::from)
+            .unwrap_or_else(|| err.to_string());
         Self(status, message)
     }
 }
