@@ -4,7 +4,7 @@ use anthropic_request::{
     tools_to_tool_configuration,
 };
 use anthropic_response::EventConverter;
-use anyhow::{anyhow, bail};
+use anyhow::anyhow;
 use async_trait::async_trait;
 use aws_sdk_bedrockruntime::{
     Client,
@@ -270,7 +270,7 @@ impl V1MessagesProvider for BedrockV1MessagesProvider {
             }
             Err(e) => {
                 error!("Bedrock API error: {:?}", e);
-                bail!("Bedrock API error: {}", e)
+                Err(e.into())
             }
         }
     }
@@ -325,7 +325,7 @@ impl V1MessagesProvider for BedrockV1MessagesProvider {
             Ok(response) => Ok(response.input_tokens),
             Err(e) => {
                 error!("Bedrock API error: {:?}", e);
-                bail!("Bedrock API error: {}", e)
+                Err(e.into())
             }
         }
     }
