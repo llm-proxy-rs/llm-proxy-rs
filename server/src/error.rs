@@ -1,7 +1,8 @@
 use anyhow::Error as AnyhowError;
-use aws_sdk_bedrockruntime::error::SdkError;
-use aws_sdk_bedrockruntime::operation::converse_stream::ConverseStreamError;
-use aws_sdk_bedrockruntime::operation::count_tokens::CountTokensError;
+use aws_sdk_bedrockruntime::{
+    error::SdkError,
+    operation::{converse_stream::ConverseStreamError, count_tokens::CountTokensError},
+};
 use axum::{http::StatusCode, response::IntoResponse};
 
 pub struct AppError(StatusCode, AnyhowError);
