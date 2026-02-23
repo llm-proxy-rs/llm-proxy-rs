@@ -96,7 +96,72 @@ mod tests {
         let message: Message = serde_json::from_value(json).unwrap();
         let bedrock = BedrockMessage::try_from(&message).unwrap();
         let content = bedrock.content();
-        assert!(matches!(content[0], ContentBlock::ToolResult(_)));
-        assert!(matches!(content[1], ContentBlock::Text(_)));
+        assert_eq!(content.len(), 2);
+        match &content[0] {
+            ContentBlock::ToolResult(result) => assert_eq!(result.tool_use_id(), "t1"),
+            other => panic!("expected ToolResult, got {:?}", other),
+        }
+        match &content[1] {
+            ContentBlock::Text(text) => assert_eq!(text, "hello"),
+            other => panic!("expected Text, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn user_message_with_cache_control() {
+        let json = serde_json::json!({
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "cached prompt", "cache_control": {"type": "ephemeral"}},
+                {"type": "text", "text": "uncached part"}
+            ]
+        });
+        let message: Message = serde_json::from_value(json).unwrap();
+        let bedrock = BedrockMessage::try_from(&message).unwrap();
+        assert_eq!(bedrock.role(), &ConversationRole::User);
+        assert_eq!(bedrock.content().len(), 3);
+        match &bedrock.content()[0] {
+            ContentBlock::Text(text) => assert_eq!(text, "cached prompt"),
+            other => panic!("expected Text, got {:?}", other),
+        }
+        assert!(matches!(bedrock.content()[1], ContentBlock::CachePoint(_)));
+        match &bedrock.content()[2] {
+            ContentBlock::Text(text) => assert_eq!(text, "uncached part"),
+            other => panic!("expected Text, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn assistant_message_with_cache_control() {
+        let json = serde_json::json!({
+            "role": "assistant",
+            "content": [
+                {"type": "text", "text": "cached response", "cache_control": {"type": "ephemeral"}}
+            ]
+        });
+        let message: Message = serde_json::from_value(json).unwrap();
+        let bedrock = BedrockMessage::try_from(&message).unwrap();
+        assert_eq!(bedrock.role(), &ConversationRole::Assistant);
+        assert_eq!(bedrock.content().len(), 2);
+        match &bedrock.content()[0] {
+            ContentBlock::Text(text) => assert_eq!(text, "cached response"),
+            other => panic!("expected Text, got {:?}", other),
+        }
+        assert!(matches!(bedrock.content()[1], ContentBlock::CachePoint(_)));
+    }
+
+    #[test]
+    fn messages_string_to_bedrock() {
+        let json = serde_json::json!("just a string");
+        let messages: Messages = serde_json::from_value(json).unwrap();
+        let bedrock = Option::<Vec<BedrockMessage>>::try_from(&messages)
+            .unwrap()
+            .unwrap();
+        assert_eq!(bedrock.len(), 1);
+        assert_eq!(bedrock[0].role(), &ConversationRole::User);
+        match &bedrock[0].content()[0] {
+            ContentBlock::Text(text) => assert_eq!(text, "just a string"),
+            other => panic!("expected Text, got {:?}", other),
+        }
     }
 }

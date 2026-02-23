@@ -59,3 +59,62 @@ impl TryFrom<&Systems> for Vec<SystemContentBlock> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn system_text_to_content_blocks() {
+        let system = System::Text {
+            text: "You are helpful".to_string(),
+            cache_control: None,
+        };
+        let blocks = Vec::<SystemContentBlock>::try_from(&system).unwrap();
+        assert_eq!(blocks.len(), 1);
+        assert!(matches!(&blocks[0], SystemContentBlock::Text(t) if t == "You are helpful"));
+    }
+
+    #[test]
+    fn system_text_with_cache_control() {
+        let system = System::Text {
+            text: "You are helpful".to_string(),
+            cache_control: Some(CacheControl {
+                cache_control_type: "ephemeral".to_string(),
+            }),
+        };
+        let blocks = Vec::<SystemContentBlock>::try_from(&system).unwrap();
+        assert_eq!(blocks.len(), 2);
+        assert!(matches!(&blocks[0], SystemContentBlock::Text(t) if t == "You are helpful"));
+        assert!(matches!(blocks[1], SystemContentBlock::CachePoint(_)));
+    }
+
+    #[test]
+    fn systems_string_to_content_blocks() {
+        let systems = Systems::String("system prompt".to_string());
+        let blocks = Vec::<SystemContentBlock>::try_from(&systems).unwrap();
+        assert_eq!(blocks.len(), 1);
+        assert!(matches!(&blocks[0], SystemContentBlock::Text(t) if t == "system prompt"));
+    }
+
+    #[test]
+    fn systems_array_with_cache_to_content_blocks() {
+        let systems = Systems::Array(vec![
+            System::Text {
+                text: "first".to_string(),
+                cache_control: Some(CacheControl {
+                    cache_control_type: "ephemeral".to_string(),
+                }),
+            },
+            System::Text {
+                text: "second".to_string(),
+                cache_control: None,
+            },
+        ]);
+        let blocks = Vec::<SystemContentBlock>::try_from(&systems).unwrap();
+        assert_eq!(blocks.len(), 3);
+        assert!(matches!(&blocks[0], SystemContentBlock::Text(t) if t == "first"));
+        assert!(matches!(blocks[1], SystemContentBlock::CachePoint(_)));
+        assert!(matches!(&blocks[2], SystemContentBlock::Text(t) if t == "second"));
+    }
+}
