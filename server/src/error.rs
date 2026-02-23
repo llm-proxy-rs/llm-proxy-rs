@@ -9,7 +9,20 @@ pub struct AppError(StatusCode, AnyhowError);
 
 impl IntoResponse for AppError {
     fn into_response(self) -> axum::response::Response {
-        (self.0, format!("Error: {}", self.1)).into_response()
+        let message = self
+            .1
+            .downcast_ref::<SdkError<ConverseStreamError>>()
+            .and_then(|e| e.as_service_error())
+            .and_then(|se| se.meta().message())
+            .or_else(|| {
+                self.1
+                    .downcast_ref::<SdkError<CountTokensError>>()
+                    .and_then(|e| e.as_service_error())
+                    .and_then(|se| se.meta().message())
+            })
+            .map(String::from)
+            .unwrap_or_else(|| self.1.to_string());
+        (self.0, message).into_response()
     }
 }
 
@@ -37,10 +50,13 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aws_sdk_bedrockruntime::types::error::ValidationException;
     use aws_smithy_runtime_api::http::{
         Response as SmithyResponse, StatusCode as SmithyStatusCode,
     };
     use aws_smithy_types::body::SdkBody;
+    use aws_smithy_types::error::ErrorMetadata;
+    use http_body_util::BodyExt;
 
     fn make_converse_stream_error(status: u16) -> anyhow::Error {
         let raw = SmithyResponse::new(
@@ -84,5 +100,28 @@ mod tests {
     fn generic_error_defaults_to_500() {
         let app_error = AppError::from(anyhow::anyhow!("something broke"));
         assert_eq!(app_error.0, StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[tokio::test]
+    async fn validation_exception_extracts_message() {
+        let expected = "The model returned the following errors: invalid beta flag";
+        let raw = SmithyResponse::new(
+            SmithyStatusCode::try_from(400).unwrap(),
+            SdkBody::from(format!(r#"{{"message":"{expected}"}}"#)),
+        );
+        let err = ConverseStreamError::ValidationException(
+            ValidationException::builder()
+                .message(expected)
+                .meta(ErrorMetadata::builder().message(expected).build())
+                .build(),
+        );
+        let sdk_err: SdkError<ConverseStreamError> = SdkError::service_error(err, raw);
+        let app_error = AppError::from(anyhow::Error::from(sdk_err));
+
+        assert_eq!(app_error.0, StatusCode::BAD_REQUEST);
+
+        let response = app_error.into_response();
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        assert_eq!(String::from_utf8(body.to_vec()).unwrap(), expected);
     }
 }
