@@ -18,15 +18,17 @@ pub enum AssistantContents {
 pub enum AssistantContent {
     #[serde(rename = "text")]
     Text {
-        text: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         cache_control: Option<CacheControl>,
+        text: String,
     },
     #[serde(rename = "tool_use")]
     ToolUse {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        cache_control: Option<CacheControl>,
         id: String,
-        name: String,
         input: serde_json::Value,
+        name: String,
     },
     #[serde(rename = "thinking")]
     Thinking { thinking: String, signature: String },
@@ -79,14 +81,26 @@ impl TryFrom<&AssistantContent> for Vec<ContentBlock> {
 
                 Ok(blocks)
             }
-            AssistantContent::ToolUse { id, name, input } => {
+            AssistantContent::ToolUse {
+                cache_control,
+                id,
+                name,
+                input,
+            } => {
                 let tool_use_block = ToolUseBlock::builder()
                     .tool_use_id(id)
                     .name(name)
                     .input(value_to_document(input))
                     .build()?;
 
-                Ok(vec![ContentBlock::ToolUse(tool_use_block)])
+                let mut blocks = vec![ContentBlock::ToolUse(tool_use_block)];
+
+                if let Some(cache_control) = cache_control {
+                    let cache_point = cache_control.try_into()?;
+                    blocks.push(ContentBlock::CachePoint(cache_point));
+                }
+
+                Ok(blocks)
             }
             AssistantContent::Thinking {
                 thinking,
@@ -123,5 +137,20 @@ mod tests {
         assert_eq!(blocks.len(), 2);
         assert!(matches!(blocks[0], ContentBlock::ReasoningContent(_)));
         assert!(matches!(blocks[1], ContentBlock::Text(_)));
+    }
+
+    #[test]
+    fn text_with_cache_control() {
+        let json = serde_json::json!([
+            {"type": "text", "text": "cached response", "cache_control": {"type": "ephemeral"}}
+        ]);
+        let contents: AssistantContents = serde_json::from_value(json).unwrap();
+        let blocks = Vec::<ContentBlock>::try_from(&contents).unwrap();
+        assert_eq!(blocks.len(), 2);
+        match &blocks[0] {
+            ContentBlock::Text(text) => assert_eq!(text, "cached response"),
+            other => panic!("expected Text, got {:?}", other),
+        }
+        assert!(matches!(blocks[1], ContentBlock::CachePoint(_)));
     }
 }

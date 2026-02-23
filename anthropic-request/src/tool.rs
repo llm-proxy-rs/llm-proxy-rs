@@ -66,3 +66,87 @@ pub fn tools_to_tool_configuration(tools: &[Tool]) -> anyhow::Result<Option<Tool
         })
         .transpose()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tool_to_bedrock_tools_without_cache() {
+        let tool = Tool {
+            cache_control: None,
+            description: "Gets the weather".to_string(),
+            input_schema: serde_json::json!({"type": "object"}),
+            name: "get_weather".to_string(),
+        };
+        let bedrock_tools = Vec::<BedrockTool>::try_from(&tool).unwrap();
+        assert_eq!(bedrock_tools.len(), 1);
+        match &bedrock_tools[0] {
+            BedrockTool::ToolSpec(spec) => {
+                assert_eq!(spec.name(), "get_weather");
+                assert_eq!(spec.description(), Some("Gets the weather"));
+            }
+            other => panic!("expected ToolSpec, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn tool_to_bedrock_tools_with_cache() {
+        let tool = Tool {
+            cache_control: Some(CacheControl {
+                cache_control_type: "ephemeral".to_string(),
+            }),
+            description: "Gets the weather".to_string(),
+            input_schema: serde_json::json!({"type": "object"}),
+            name: "get_weather".to_string(),
+        };
+        let bedrock_tools = Vec::<BedrockTool>::try_from(&tool).unwrap();
+        assert_eq!(bedrock_tools.len(), 2);
+        match &bedrock_tools[0] {
+            BedrockTool::ToolSpec(spec) => assert_eq!(spec.name(), "get_weather"),
+            other => panic!("expected ToolSpec, got {:?}", other),
+        }
+        assert!(matches!(bedrock_tools[1], BedrockTool::CachePoint(_)));
+    }
+
+    #[test]
+    fn tool_with_empty_description_is_none() {
+        let tool = Tool {
+            cache_control: None,
+            description: "".to_string(),
+            input_schema: serde_json::json!({"type": "object"}),
+            name: "get_weather".to_string(),
+        };
+        let bedrock_tools = Vec::<BedrockTool>::try_from(&tool).unwrap();
+        match &bedrock_tools[0] {
+            BedrockTool::ToolSpec(spec) => assert!(spec.description().is_none()),
+            other => panic!("expected ToolSpec, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn tools_to_bedrock_tools_empty_returns_none() {
+        let tools: Vec<Tool> = vec![];
+        let result = tools_to_bedrock_tools(&tools).unwrap();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn tools_to_tool_configuration_with_cache() {
+        let tools = vec![Tool {
+            cache_control: Some(CacheControl {
+                cache_control_type: "ephemeral".to_string(),
+            }),
+            description: "A tool".to_string(),
+            input_schema: serde_json::json!({"type": "object"}),
+            name: "my_tool".to_string(),
+        }];
+        let config = tools_to_tool_configuration(&tools).unwrap().unwrap();
+        assert_eq!(config.tools().len(), 2);
+        match &config.tools()[0] {
+            BedrockTool::ToolSpec(spec) => assert_eq!(spec.name(), "my_tool"),
+            other => panic!("expected ToolSpec, got {:?}", other),
+        }
+        assert!(matches!(config.tools()[1], BedrockTool::CachePoint(_)));
+    }
+}
