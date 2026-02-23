@@ -1,6 +1,6 @@
 use crate::{DONE_MESSAGE, create_sse_event};
 use anthropic_request::{get_additional_model_request_fields, output_config::OutputConfig};
-use anyhow::{anyhow, bail};
+use anyhow::anyhow;
 use async_trait::async_trait;
 use aws_sdk_bedrockruntime::Client;
 use aws_sdk_bedrockruntime::primitives::event_stream::EventReceiver;
@@ -167,7 +167,7 @@ impl ChatCompletionsProvider for BedrockChatCompletionsProvider {
             }
             Err(e) => {
                 tracing::error!("Bedrock API error: {:?}", e);
-                bail!("Bedrock API error: {}", e)
+                return Err(e.into());
             }
         };
 
