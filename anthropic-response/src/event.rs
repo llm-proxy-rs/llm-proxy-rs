@@ -291,7 +291,57 @@ pub struct MessageDeltaContent {
 
 #[derive(Debug, Default, Deserialize, Serialize)]
 pub struct UsageDelta {
+    pub input_tokens: i32,
     pub output_tokens: i32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_creation_input_tokens: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_read_input_tokens: Option<i32>,
+}
+
+impl UsageDelta {
+    pub fn builder() -> UsageDeltaBuilder {
+        UsageDeltaBuilder::default()
+    }
+}
+
+#[derive(Default)]
+pub struct UsageDeltaBuilder {
+    input_tokens: i32,
+    output_tokens: i32,
+    cache_creation_input_tokens: Option<i32>,
+    cache_read_input_tokens: Option<i32>,
+}
+
+impl UsageDeltaBuilder {
+    pub fn input_tokens(mut self, input_tokens: i32) -> Self {
+        self.input_tokens = input_tokens;
+        self
+    }
+
+    pub fn output_tokens(mut self, output_tokens: i32) -> Self {
+        self.output_tokens = output_tokens;
+        self
+    }
+
+    pub fn cache_creation_input_tokens(mut self, cache_creation_input_tokens: Option<i32>) -> Self {
+        self.cache_creation_input_tokens = cache_creation_input_tokens;
+        self
+    }
+
+    pub fn cache_read_input_tokens(mut self, cache_read_input_tokens: Option<i32>) -> Self {
+        self.cache_read_input_tokens = cache_read_input_tokens;
+        self
+    }
+
+    pub fn build(self) -> UsageDelta {
+        UsageDelta {
+            input_tokens: self.input_tokens,
+            output_tokens: self.output_tokens,
+            cache_creation_input_tokens: self.cache_creation_input_tokens,
+            cache_read_input_tokens: self.cache_read_input_tokens,
+        }
+    }
 }
 
 #[cfg(test)]

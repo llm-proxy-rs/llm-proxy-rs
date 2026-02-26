@@ -164,9 +164,28 @@ impl EventConverter {
                                 stop_reason: self.stop_reason.clone(),
                                 stop_sequence: None,
                             })
-                            .usage(UsageDelta {
-                                output_tokens: event.usage.as_ref().map_or(0, |u| u.output_tokens),
-                            })
+                            .usage(
+                                UsageDelta::builder()
+                                    .input_tokens(
+                                        event.usage.as_ref().map_or(0, |u| u.input_tokens),
+                                    )
+                                    .output_tokens(
+                                        event.usage.as_ref().map_or(0, |u| u.output_tokens),
+                                    )
+                                    .cache_creation_input_tokens(
+                                        event
+                                            .usage
+                                            .as_ref()
+                                            .and_then(|u| u.cache_write_input_tokens),
+                                    )
+                                    .cache_read_input_tokens(
+                                        event
+                                            .usage
+                                            .as_ref()
+                                            .and_then(|u| u.cache_read_input_tokens),
+                                    )
+                                    .build(),
+                            )
                             .build(),
                     ),
                     ("message_stop", Event::message_stop()),
