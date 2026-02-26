@@ -1,7 +1,8 @@
-use aws_sdk_bedrockruntime::types::{ImageBlock, ToolResultContentBlock};
+use aws_sdk_bedrockruntime::types::{DocumentBlock, ImageBlock, ToolResultContentBlock};
 use common::value_to_document;
 use serde::{Deserialize, Serialize};
 
+use crate::document_source::DocumentSource;
 use crate::image_source::ImageSource;
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -14,10 +15,12 @@ pub enum ToolResultContents {
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(tag = "type")]
 pub enum ToolResultContent {
-    #[serde(rename = "text")]
-    Text { text: String },
+    #[serde(rename = "document")]
+    Document { source: DocumentSource },
     #[serde(rename = "image")]
     Image { source: ImageSource },
+    #[serde(rename = "text")]
+    Text { text: String },
     #[serde(rename = "tool_reference")]
     ToolReference { tool_name: String },
     #[serde(other)]
@@ -29,12 +32,15 @@ impl TryFrom<&ToolResultContent> for Option<ToolResultContentBlock> {
 
     fn try_from(content: &ToolResultContent) -> Result<Self, Self::Error> {
         match content {
-            ToolResultContent::Text { text } => {
-                Ok(Some(ToolResultContentBlock::Text(text.clone())))
-            }
+            ToolResultContent::Document { source } => Ok(Some(ToolResultContentBlock::Document(
+                DocumentBlock::try_from(source)?,
+            ))),
             ToolResultContent::Image { source } => Ok(Some(ToolResultContentBlock::Image(
                 ImageBlock::try_from(source)?,
             ))),
+            ToolResultContent::Text { text } => {
+                Ok(Some(ToolResultContentBlock::Text(text.clone())))
+            }
             ToolResultContent::ToolReference { .. } => {
                 let value = serde_json::to_value(content)?;
                 Ok(Some(ToolResultContentBlock::Json(value_to_document(
@@ -121,6 +127,27 @@ mod tests {
         let blocks = Vec::<ToolResultContentBlock>::try_from(&contents).unwrap();
         assert_eq!(blocks.len(), 1);
         assert!(matches!(blocks[0], ToolResultContentBlock::Json(_)));
+    }
+
+    #[test]
+    fn tool_result_with_document_deserializes() {
+        use base64::{Engine as _, engine::general_purpose};
+
+        let data = general_purpose::STANDARD.encode(b"%PDF-1.4");
+        let json = serde_json::json!([
+            {
+                "type": "document",
+                "source": {
+                    "type": "base64",
+                    "media_type": "application/pdf",
+                    "data": data
+                }
+            }
+        ]);
+        let contents: ToolResultContents = serde_json::from_value(json).unwrap();
+        let blocks = Vec::<ToolResultContentBlock>::try_from(&contents).unwrap();
+        assert_eq!(blocks.len(), 1);
+        assert!(matches!(blocks[0], ToolResultContentBlock::Document(_)));
     }
 
     #[test]
