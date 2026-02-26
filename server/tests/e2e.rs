@@ -236,6 +236,89 @@ async fn v1_messages_with_context_1m_beta() {
 
 #[tokio::test]
 #[ignore]
+async fn v1_messages_with_tool_reference_content() {
+    let app = build_app().await;
+
+    let body = serde_json::json!({
+        "model": "global.anthropic.claude-opus-4-6-v1",
+        "max_tokens": 64,
+        "stream": true,
+        "tools": [
+            {
+                "name": "do_something",
+                "description": "Does something and returns nothing.",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {},
+                    "required": []
+                }
+            }
+        ],
+        "messages": [
+            {
+                "role": "user",
+                "content": "Call do_something."
+            },
+            {
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "id": "tooluse_ref123",
+                        "name": "do_something",
+                        "input": {}
+                    }
+                ]
+            },
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "tooluse_ref123",
+                        "cache_control": {"type": "ephemeral"},
+                        "content": [
+                            {
+                                "type": "tool_reference",
+                                "tool_name": "do_something"
+                            }
+                        ]
+                    }
+                ]
+            }
+        ]
+    });
+
+    let request = axum::http::Request::builder()
+        .method("POST")
+        .uri("/v1/messages")
+        .header("content-type", "application/json")
+        .body(Body::from(serde_json::to_vec(&body).unwrap()))
+        .unwrap();
+
+    let response = app.oneshot(request).await.unwrap();
+    assert_eq!(response.status(), 200);
+
+    let body_bytes = response.into_body().collect().await.unwrap().to_bytes();
+    let body_str = String::from_utf8(body_bytes.to_vec()).unwrap();
+
+    let events = parse_sse_events(&body_str);
+    let event_types: Vec<&str> = events.iter().map(|(e, _)| e.as_str()).collect();
+
+    assert!(
+        event_types.contains(&"message_start"),
+        "missing message_start, got: {event_types:?}"
+    );
+    assert!(
+        event_types.contains(&"message_stop"),
+        "missing message_stop, got: {event_types:?}"
+    );
+    assert_eq!(event_types.first(), Some(&"message_start"));
+    assert_eq!(event_types.last(), Some(&"message_stop"));
+}
+
+#[tokio::test]
+#[ignore]
 async fn v1_messages_tool_result_with_image_and_cache_control() {
     let app = build_app().await;
 

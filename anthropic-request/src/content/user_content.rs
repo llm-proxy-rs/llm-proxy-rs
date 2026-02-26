@@ -32,7 +32,8 @@ pub enum UserContent {
     ToolResult {
         #[serde(skip_serializing_if = "Option::is_none")]
         cache_control: Option<CacheControl>,
-        content: ToolResultContents,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        content: Option<ToolResultContents>,
         #[serde(skip_serializing_if = "Option::is_none")]
         is_error: Option<bool>,
         tool_use_id: String,
@@ -93,7 +94,10 @@ impl TryFrom<&UserContent> for Option<Vec<ContentBlock>> {
             } => {
                 let tool_result_block = ToolResultBlock::builder()
                     .tool_use_id(tool_use_id)
-                    .set_content(Some(content.try_into()?))
+                    .set_content(Some(match content {
+                        Some(c) => c.try_into()?,
+                        None => vec![],
+                    }))
                     .set_status(is_error.map(|is_error| {
                         if is_error {
                             ToolResultStatus::Error
@@ -158,6 +162,17 @@ mod tests {
             other => panic!("expected Text, got {:?}", other),
         }
         assert!(matches!(blocks[1], ContentBlock::CachePoint(_)));
+    }
+
+    #[test]
+    fn tool_result_with_missing_content_deserializes() {
+        let json = serde_json::json!([
+            {"type": "tool_result", "tool_use_id": "t1"}
+        ]);
+        let contents: UserContents = serde_json::from_value(json).unwrap();
+        let blocks = Vec::<ContentBlock>::try_from(&contents).unwrap();
+        assert_eq!(blocks.len(), 1);
+        assert!(matches!(blocks[0], ContentBlock::ToolResult(_)));
     }
 
     #[test]
