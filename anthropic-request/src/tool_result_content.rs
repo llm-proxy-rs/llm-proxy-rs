@@ -1,5 +1,5 @@
 use aws_sdk_bedrockruntime::types::{DocumentBlock, ImageBlock, ToolResultContentBlock};
-use common::value_to_document;
+use aws_smithy_types::Document;
 use serde::{Deserialize, Serialize};
 
 use crate::document_source::DocumentSource;
@@ -41,10 +41,17 @@ impl TryFrom<&ToolResultContent> for Option<ToolResultContentBlock> {
             ToolResultContent::Text { text } => {
                 Ok(Some(ToolResultContentBlock::Text(text.clone())))
             }
-            ToolResultContent::ToolReference { .. } => {
-                let value = serde_json::to_value(content)?;
-                Ok(Some(ToolResultContentBlock::Json(value_to_document(
-                    &value,
+            ToolResultContent::ToolReference { tool_name } => {
+                Ok(Some(ToolResultContentBlock::Json(Document::Object(
+                    [
+                        (
+                            "type".to_string(),
+                            Document::String("tool_reference".to_string()),
+                        ),
+                        ("tool_name".to_string(), Document::String(tool_name.clone())),
+                    ]
+                    .into_iter()
+                    .collect(),
                 ))))
             }
             ToolResultContent::Unknown => Ok(None),
