@@ -1,4 +1,5 @@
 use aws_sdk_bedrockruntime::types::{ImageBlock, ToolResultContentBlock};
+use common::value_to_document;
 use serde::{Deserialize, Serialize};
 
 use crate::image_source::ImageSource;
@@ -17,17 +18,30 @@ pub enum ToolResultContent {
     Text { text: String },
     #[serde(rename = "image")]
     Image { source: ImageSource },
+    #[serde(rename = "tool_reference")]
+    ToolReference { tool_name: String },
+    #[serde(other)]
+    Unknown,
 }
 
-impl TryFrom<&ToolResultContent> for ToolResultContentBlock {
+impl TryFrom<&ToolResultContent> for Option<ToolResultContentBlock> {
     type Error = anyhow::Error;
 
     fn try_from(content: &ToolResultContent) -> Result<Self, Self::Error> {
         match content {
-            ToolResultContent::Text { text } => Ok(ToolResultContentBlock::Text(text.clone())),
-            ToolResultContent::Image { source } => {
-                Ok(ToolResultContentBlock::Image(ImageBlock::try_from(source)?))
+            ToolResultContent::Text { text } => {
+                Ok(Some(ToolResultContentBlock::Text(text.clone())))
             }
+            ToolResultContent::Image { source } => Ok(Some(ToolResultContentBlock::Image(
+                ImageBlock::try_from(source)?,
+            ))),
+            ToolResultContent::ToolReference { .. } => {
+                let value = serde_json::to_value(content)?;
+                Ok(Some(ToolResultContentBlock::Json(value_to_document(
+                    &value,
+                ))))
+            }
+            ToolResultContent::Unknown => Ok(None),
         }
     }
 }
@@ -40,8 +54,9 @@ impl TryFrom<&ToolResultContents> for Vec<ToolResultContentBlock> {
             ToolResultContents::String(s) => Ok(vec![ToolResultContentBlock::Text(s.clone())]),
             ToolResultContents::Array(a) => a
                 .iter()
-                .map(ToolResultContentBlock::try_from)
-                .collect::<Result<Vec<_>, _>>(),
+                .map(Option::<ToolResultContentBlock>::try_from)
+                .collect::<Result<Vec<_>, _>>()
+                .map(|v| v.into_iter().flatten().collect()),
         }
     }
 }
@@ -95,5 +110,29 @@ mod tests {
         let blocks = Vec::<ToolResultContentBlock>::try_from(&contents).unwrap();
         assert_eq!(blocks.len(), 1);
         assert!(matches!(blocks[0], ToolResultContentBlock::Text(_)));
+    }
+
+    #[test]
+    fn tool_result_with_tool_reference_becomes_json() {
+        let json = serde_json::json!([
+            {"type": "tool_reference", "tool_name": "AskUserQuestion"}
+        ]);
+        let contents: ToolResultContents = serde_json::from_value(json).unwrap();
+        let blocks = Vec::<ToolResultContentBlock>::try_from(&contents).unwrap();
+        assert_eq!(blocks.len(), 1);
+        assert!(matches!(blocks[0], ToolResultContentBlock::Json(_)));
+    }
+
+    #[test]
+    fn tool_result_with_unknown_type_mixed_keeps_known() {
+        let json = serde_json::json!([
+            {"type": "text", "text": "hello"},
+            {"type": "tool_reference", "tool_name": "AskUserQuestion"}
+        ]);
+        let contents: ToolResultContents = serde_json::from_value(json).unwrap();
+        let blocks = Vec::<ToolResultContentBlock>::try_from(&contents).unwrap();
+        assert_eq!(blocks.len(), 2);
+        assert!(matches!(blocks[0], ToolResultContentBlock::Text(_)));
+        assert!(matches!(blocks[1], ToolResultContentBlock::Json(_)));
     }
 }
