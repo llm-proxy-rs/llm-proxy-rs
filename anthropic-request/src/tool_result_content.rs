@@ -15,12 +15,12 @@ pub enum ToolResultContents {
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(tag = "type")]
 pub enum ToolResultContent {
+    #[serde(rename = "text")]
+    Text { text: String },
     #[serde(rename = "document")]
     Document { source: DocumentSource },
     #[serde(rename = "image")]
     Image { source: ImageSource },
-    #[serde(rename = "text")]
-    Text { text: String },
     #[serde(rename = "tool_reference")]
     ToolReference { tool_name: String },
     #[serde(other)]
@@ -35,12 +35,12 @@ impl TryFrom<&ToolResultContent> for Option<ToolResultContentBlock> {
             ToolResultContent::Document { source } => Ok(Some(ToolResultContentBlock::Document(
                 DocumentBlock::try_from(source)?,
             ))),
-            ToolResultContent::Image { source } => Ok(Some(ToolResultContentBlock::Image(
-                ImageBlock::try_from(source)?,
-            ))),
             ToolResultContent::Text { text } => {
                 Ok(Some(ToolResultContentBlock::Text(text.clone())))
             }
+            ToolResultContent::Image { source } => Ok(Some(ToolResultContentBlock::Image(
+                ImageBlock::try_from(source)?,
+            ))),
             ToolResultContent::ToolReference { tool_name } => {
                 Ok(Some(ToolResultContentBlock::Json(Document::Object(
                     [

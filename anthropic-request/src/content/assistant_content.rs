@@ -32,6 +32,14 @@ pub enum AssistantContent {
     },
     #[serde(rename = "thinking")]
     Thinking { thinking: String, signature: String },
+    #[serde(rename = "redacted_thinking")]
+    RedactedThinking { data: String },
+    #[serde(rename = "server_tool_use")]
+    ServerToolUse {
+        id: String,
+        input: serde_json::Value,
+        name: String,
+    },
 }
 
 impl TryFrom<&AssistantContents> for Vec<ContentBlock> {
@@ -43,9 +51,10 @@ impl TryFrom<&AssistantContents> for Vec<ContentBlock> {
             AssistantContents::Array(arr) => {
                 let all_content_blocks: Vec<_> = arr
                     .iter()
-                    .map(Vec::try_from)
+                    .map(Option::<Vec<_>>::try_from)
                     .collect::<Result<Vec<_>, _>>()?
                     .into_iter()
+                    .flatten()
                     .flatten()
                     .collect();
 
@@ -63,7 +72,7 @@ impl TryFrom<&AssistantContents> for Vec<ContentBlock> {
     }
 }
 
-impl TryFrom<&AssistantContent> for Vec<ContentBlock> {
+impl TryFrom<&AssistantContent> for Option<Vec<ContentBlock>> {
     type Error = anyhow::Error;
 
     fn try_from(content: &AssistantContent) -> Result<Self, Self::Error> {
@@ -79,7 +88,7 @@ impl TryFrom<&AssistantContent> for Vec<ContentBlock> {
                     blocks.push(ContentBlock::CachePoint(cache_point));
                 }
 
-                Ok(blocks)
+                Ok(Some(blocks))
             }
             AssistantContent::ToolUse {
                 cache_control,
@@ -100,7 +109,7 @@ impl TryFrom<&AssistantContent> for Vec<ContentBlock> {
                     blocks.push(ContentBlock::CachePoint(cache_point));
                 }
 
-                Ok(blocks)
+                Ok(Some(blocks))
             }
             AssistantContent::Thinking {
                 thinking,
@@ -114,10 +123,12 @@ impl TryFrom<&AssistantContent> for Vec<ContentBlock> {
                 let reasoning_content_block =
                     ReasoningContentBlock::ReasoningText(reasoning_text_block);
 
-                Ok(vec![ContentBlock::ReasoningContent(
+                Ok(Some(vec![ContentBlock::ReasoningContent(
                     reasoning_content_block,
-                )])
+                )]))
             }
+            AssistantContent::RedactedThinking { .. } => Ok(None),
+            AssistantContent::ServerToolUse { .. } => Ok(None),
         }
     }
 }

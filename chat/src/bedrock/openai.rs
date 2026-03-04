@@ -6,7 +6,7 @@ use request::ChatCompletionsRequest;
 
 use crate::bedrock::BedrockChatCompletion;
 
-pub fn process_chat_completions_request_to_bedrock_chat_completion(
+pub fn build_bedrock_chat_completion(
     request: &ChatCompletionsRequest,
 ) -> Result<BedrockChatCompletion> {
     let mut system_content_blocks = Vec::new();

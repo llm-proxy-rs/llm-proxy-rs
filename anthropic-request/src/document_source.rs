@@ -10,6 +10,10 @@ use serde::{Deserialize, Serialize};
 pub enum DocumentSource {
     #[serde(rename = "base64")]
     Base64 { media_type: String, data: String },
+    #[serde(rename = "url")]
+    Url { url: String },
+    #[serde(rename = "text")]
+    Text { media_type: String, data: String },
 }
 
 impl TryFrom<&DocumentSource> for DocumentBlock {
@@ -28,11 +32,7 @@ impl TryFrom<&DocumentSource> for DocumentBlock {
                     "application/vnd.openxmlformats-officedocument.wordprocessingml.document" => {
                         DocumentFormat::Docx
                     }
-                    "text/csv" => DocumentFormat::Csv,
-                    "text/html" => DocumentFormat::Html,
-                    "text/markdown" => DocumentFormat::Md,
-                    "text/plain" => DocumentFormat::Txt,
-                    _ => bail!("Unsupported document media type: {media_type}"),
+                    _ => bail!("Unsupported base64 document media type: {media_type}"),
                 };
 
                 let bytes = general_purpose::STANDARD.decode(data)?;
@@ -41,6 +41,22 @@ impl TryFrom<&DocumentSource> for DocumentBlock {
                     .format(format)
                     .name("document")
                     .source(BedrockDocumentSource::Bytes(bytes.into()))
+                    .build()?)
+            }
+            DocumentSource::Url { url } => bail!("URL document sources are not supported: {url}"),
+            DocumentSource::Text { media_type, data } => {
+                let format = match media_type.as_str() {
+                    "text/csv" => DocumentFormat::Csv,
+                    "text/html" => DocumentFormat::Html,
+                    "text/markdown" => DocumentFormat::Md,
+                    "text/plain" => DocumentFormat::Txt,
+                    _ => bail!("Unsupported text document media type: {media_type}"),
+                };
+
+                Ok(DocumentBlock::builder()
+                    .format(format)
+                    .name("document")
+                    .source(BedrockDocumentSource::Text(data.clone()))
                     .build()?)
             }
         }
