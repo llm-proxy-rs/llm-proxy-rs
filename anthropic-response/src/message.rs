@@ -17,6 +17,10 @@ pub struct Message {
 pub struct Usage {
     pub input_tokens: i32,
     pub output_tokens: i32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_creation_input_tokens: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_read_input_tokens: Option<i32>,
 }
 
 impl Message {
@@ -102,6 +106,8 @@ impl Usage {
 pub struct UsageBuilder {
     input_tokens: i32,
     output_tokens: i32,
+    cache_creation_input_tokens: Option<i32>,
+    cache_read_input_tokens: Option<i32>,
 }
 
 impl UsageBuilder {
@@ -115,10 +121,22 @@ impl UsageBuilder {
         self
     }
 
+    pub fn cache_creation_input_tokens(mut self, tokens: Option<i32>) -> Self {
+        self.cache_creation_input_tokens = tokens;
+        self
+    }
+
+    pub fn cache_read_input_tokens(mut self, tokens: Option<i32>) -> Self {
+        self.cache_read_input_tokens = tokens;
+        self
+    }
+
     pub fn build(self) -> Usage {
         Usage {
             input_tokens: self.input_tokens,
             output_tokens: self.output_tokens,
+            cache_creation_input_tokens: self.cache_creation_input_tokens,
+            cache_read_input_tokens: self.cache_read_input_tokens,
         }
     }
 }

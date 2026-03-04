@@ -6,8 +6,8 @@ pub mod error;
 pub mod handlers;
 pub mod utils;
 
-use handlers::anthropic::{v1_messages, v1_messages_count_tokens};
-use handlers::openai::chat_completions;
+use handlers::anthropic::{handle_v1_messages, handle_v1_messages_count_tokens};
+use handlers::openai::handle_chat_completions;
 
 pub struct AppState {
     pub bedrockruntime_client: Client,
@@ -17,8 +17,11 @@ pub struct AppState {
 
 pub fn get_app(state: Arc<AppState>) -> Router {
     Router::new()
-        .route("/chat/completions", post(chat_completions))
-        .route("/v1/messages", post(v1_messages))
-        .route("/v1/messages/count_tokens", post(v1_messages_count_tokens))
+        .route("/chat/completions", post(handle_chat_completions))
+        .route("/v1/messages", post(handle_v1_messages))
+        .route(
+            "/v1/messages/count_tokens",
+            post(handle_v1_messages_count_tokens),
+        )
         .with_state(state)
 }

@@ -81,6 +81,7 @@ mod tests {
             text: "You are helpful".to_string(),
             cache_control: Some(CacheControl {
                 cache_control_type: "ephemeral".to_string(),
+                ttl: None,
             }),
         };
         let blocks = Vec::<SystemContentBlock>::try_from(&system).unwrap();
@@ -104,6 +105,7 @@ mod tests {
                 text: "first".to_string(),
                 cache_control: Some(CacheControl {
                     cache_control_type: "ephemeral".to_string(),
+                    ttl: None,
                 }),
             },
             System::Text {

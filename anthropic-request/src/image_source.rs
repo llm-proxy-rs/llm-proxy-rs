@@ -8,6 +8,8 @@ use serde::{Deserialize, Serialize};
 pub enum ImageSource {
     #[serde(rename = "base64")]
     Base64 { media_type: String, data: String },
+    #[serde(rename = "url")]
+    Url { url: String },
 }
 
 impl TryFrom<&ImageSource> for ImageBlock {
@@ -31,6 +33,7 @@ impl TryFrom<&ImageSource> for ImageBlock {
                     .source(BedrockImageSource::Bytes(bytes.into()))
                     .build()?)
             }
+            ImageSource::Url { url } => bail!("URL image sources are not supported: {url}"),
         }
     }
 }

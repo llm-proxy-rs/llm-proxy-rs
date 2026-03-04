@@ -4,8 +4,8 @@ use aws_sdk_bedrockruntime::types::{
 use std::sync::Arc;
 
 use crate::{
-    bedrock_content_block_delta_to_content_block_delta,
     content_block_delta::ContentBlockDelta,
+    convert_bedrock_content_block_delta,
     event::{ContentBlock, Event, MessageDeltaContent, UsageDelta},
     message::Message,
 };
@@ -84,7 +84,7 @@ impl EventConverter {
                 let delta = event
                     .delta
                     .as_ref()
-                    .and_then(bedrock_content_block_delta_to_content_block_delta)?;
+                    .and_then(convert_bedrock_content_block_delta)?;
 
                 let mut events = vec![];
 

@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 pub enum Thinking {
     Enabled { budget_tokens: i32 },
     Adaptive,
+    Disabled,
 }
 
 impl From<&Thinking> for Document {
@@ -22,6 +23,11 @@ impl From<&Thinking> for Document {
                     .collect(),
                     Thinking::Adaptive => {
                         [("type".to_string(), Document::String("adaptive".to_string()))]
+                            .into_iter()
+                            .collect()
+                    }
+                    Thinking::Disabled => {
+                        [("type".to_string(), Document::String("disabled".to_string()))]
                             .into_iter()
                             .collect()
                     }

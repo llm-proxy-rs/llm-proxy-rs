@@ -1,7 +1,7 @@
 use anthropic_request::{
     AssistantContent, AssistantContents, Message, Messages, UserContent, UserContents,
-    V1MessagesCountTokensRequest, V1MessagesRequest, get_additional_model_request_fields,
-    tools_to_tool_configuration,
+    V1MessagesCountTokensRequest, V1MessagesRequest, build_tool_configuration,
+    get_additional_model_request_fields,
 };
 use anthropic_response::EventConverter;
 use anyhow::anyhow;
@@ -139,6 +139,9 @@ fn log_v1_messages_request(request: &V1MessagesRequest) {
                                     UserContent::Image { .. } => "Image",
                                     UserContent::Text { .. } => "Text",
                                     UserContent::ToolResult { .. } => "ToolResult",
+                                    UserContent::Thinking { .. } => "Thinking",
+                                    UserContent::RedactedThinking { .. } => "RedactedThinking",
+                                    UserContent::ServerToolResult { .. } => "ServerToolResult",
                                 })
                                 .collect::<Vec<_>>()
                                 .join(", "),
@@ -157,6 +160,8 @@ fn log_v1_messages_request(request: &V1MessagesRequest) {
                                     AssistantContent::Text { .. } => "Text",
                                     AssistantContent::Thinking { .. } => "Thinking",
                                     AssistantContent::ToolUse { .. } => "ToolUse",
+                                    AssistantContent::RedactedThinking { .. } => "RedactedThinking",
+                                    AssistantContent::ServerToolUse { .. } => "ServerToolUse",
                                 })
                                 .collect::<Vec<_>>()
                                 .join(", "),
@@ -291,7 +296,7 @@ impl V1MessagesProvider for BedrockV1MessagesProvider {
         let tool_config = request
             .tools
             .as_deref()
-            .map(tools_to_tool_configuration)
+            .map(build_tool_configuration)
             .transpose()?
             .flatten();
 
