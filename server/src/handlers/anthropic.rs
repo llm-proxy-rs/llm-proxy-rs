@@ -1,4 +1,4 @@
-use anthropic_request::{V1MessagesCountTokensRequest, V1MessagesRequest};
+use anthropic_request::{OutputConfig, V1MessagesCountTokensRequest, V1MessagesRequest};
 use anthropic_response::V1MessagesCountTokensResponse;
 use anyhow::anyhow;
 use axum::{
@@ -12,9 +12,9 @@ use common::filter_anthropic_beta;
 use std::sync::Arc;
 use tracing::{error, info};
 
-use crate::{AppState, error::AppError, utils::usage_callback};
+use crate::{AppState, error::AppError, utils::log_token_usage};
 
-pub async fn v1_messages(
+pub async fn handle_v1_messages(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     Json(payload): Json<V1MessagesRequest>,
@@ -26,13 +26,13 @@ pub async fn v1_messages(
 
     if let Some(ref output_config) = payload.output_config {
         match output_config {
-            anthropic_request::OutputConfig::Format { .. } => {
+            OutputConfig::Format { .. } => {
                 info!("Request includes output_config with JSON schema format");
             }
-            anthropic_request::OutputConfig::Effort { effort } => {
+            OutputConfig::Effort { effort } => {
                 info!("Request includes output_config with effort: {}", effort);
             }
-            anthropic_request::OutputConfig::Other(value) => {
+            OutputConfig::Other(value) => {
                 info!(
                     "Request includes unknown output_config (ignored): {:?}",
                     value
@@ -50,13 +50,13 @@ pub async fn v1_messages(
     info!("anthropic_beta: {:?}", anthropic_beta);
 
     let stream = BedrockV1MessagesProvider::new(state.bedrockruntime_client.clone())
-        .v1_messages_stream(payload, None, anthropic_beta, usage_callback)
+        .v1_messages_stream(payload, None, anthropic_beta, log_token_usage)
         .await?;
 
     Ok((StatusCode::OK, Sse::new(stream)))
 }
 
-pub async fn v1_messages_count_tokens(
+pub async fn handle_v1_messages_count_tokens(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<V1MessagesCountTokensRequest>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -65,15 +65,15 @@ pub async fn v1_messages_count_tokens(
         payload.model
     );
 
-    let provider = BedrockV1MessagesProvider::new(state.bedrockruntime_client.clone());
-    let count = provider
+    let v1_messages_provider = BedrockV1MessagesProvider::new(state.bedrockruntime_client.clone());
+    let input_token_count = v1_messages_provider
         .v1_messages_count_tokens(&payload, &state.inference_profile_prefixes)
         .await?;
 
     Ok((
         StatusCode::OK,
         Json(V1MessagesCountTokensResponse {
-            input_tokens: count,
+            input_tokens: input_token_count,
         }),
     ))
 }

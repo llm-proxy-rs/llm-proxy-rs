@@ -38,6 +38,15 @@ pub enum UserContent {
         is_error: Option<bool>,
         tool_use_id: String,
     },
+    #[serde(rename = "thinking")]
+    Thinking { thinking: String, signature: String },
+    #[serde(rename = "redacted_thinking")]
+    RedactedThinking { data: String },
+    #[serde(rename = "server_tool_result")]
+    ServerToolResult {
+        tool_use_id: String,
+        content: serde_json::Value,
+    },
 }
 
 impl TryFrom<&UserContents> for Vec<ContentBlock> {
@@ -116,6 +125,9 @@ impl TryFrom<&UserContent> for Option<Vec<ContentBlock>> {
 
                 Ok(Some(blocks))
             }
+            UserContent::Thinking { .. } => Ok(None),
+            UserContent::RedactedThinking { .. } => Ok(None),
+            UserContent::ServerToolResult { .. } => Ok(None),
         }
     }
 }

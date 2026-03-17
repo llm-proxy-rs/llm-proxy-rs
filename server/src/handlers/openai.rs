@@ -10,9 +10,9 @@ use request::ChatCompletionsRequest;
 use std::sync::Arc;
 use tracing::{error, info};
 
-use crate::{AppState, error::AppError, utils::usage_callback};
+use crate::{AppState, error::AppError, utils::log_token_usage};
 
-pub async fn chat_completions(
+pub async fn handle_chat_completions(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<ChatCompletionsRequest>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -27,7 +27,7 @@ pub async fn chat_completions(
     }
 
     let stream = BedrockChatCompletionsProvider::new(state.bedrockruntime_client.clone())
-        .chat_completions_stream(payload, usage_callback)
+        .chat_completions_stream(payload, log_token_usage)
         .await?;
 
     Ok((StatusCode::OK, Sse::new(stream)))

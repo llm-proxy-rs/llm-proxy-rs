@@ -171,8 +171,16 @@ pub enum ContentBlock {
     Text { text: String },
     #[serde(rename = "thinking")]
     Thinking { signature: String, thinking: String },
+    #[serde(rename = "redacted_thinking")]
+    RedactedThinking { data: String },
     #[serde(rename = "tool_use")]
     ToolUse {
+        id: String,
+        input: serde_json::Value,
+        name: String,
+    },
+    #[serde(rename = "server_tool_use")]
+    ServerToolUse {
         id: String,
         input: serde_json::Value,
         name: String,

@@ -319,6 +319,197 @@ async fn v1_messages_with_tool_reference_content() {
 
 #[tokio::test]
 #[ignore]
+async fn v1_messages_with_thinking_disabled() {
+    let app = build_app().await;
+
+    let body = serde_json::json!({
+        "model": "global.anthropic.claude-sonnet-4-20250514-v1",
+        "max_tokens": 64,
+        "stream": true,
+        "thinking": {"type": "disabled"},
+        "messages": [
+            {"role": "user", "content": "Say hi in exactly one word."}
+        ]
+    });
+
+    let request = axum::http::Request::builder()
+        .method("POST")
+        .uri("/v1/messages")
+        .header("content-type", "application/json")
+        .body(Body::from(serde_json::to_vec(&body).unwrap()))
+        .unwrap();
+
+    let response = app.oneshot(request).await.unwrap();
+    assert_eq!(response.status(), 200);
+
+    let body_bytes = response.into_body().collect().await.unwrap().to_bytes();
+    let body_str = String::from_utf8(body_bytes.to_vec()).unwrap();
+
+    let events = parse_sse_events(&body_str);
+    let event_types: Vec<&str> = events.iter().map(|(e, _)| e.as_str()).collect();
+
+    assert!(
+        event_types.contains(&"message_start"),
+        "missing message_start, got: {event_types:?}"
+    );
+    assert!(
+        event_types.contains(&"message_stop"),
+        "missing message_stop, got: {event_types:?}"
+    );
+    assert_eq!(event_types.first(), Some(&"message_start"));
+    assert_eq!(event_types.last(), Some(&"message_stop"));
+
+    let has_thinking_block = events.iter().any(|(_, data)| {
+        serde_json::from_str::<serde_json::Value>(data)
+            .ok()
+            .and_then(|v| v.get("content_block").cloned())
+            .and_then(|b| b.get("type").cloned())
+            .and_then(|t| t.as_str().map(|s| s == "thinking"))
+            .unwrap_or(false)
+    });
+    assert!(
+        !has_thinking_block,
+        "thinking disabled but got a thinking content block"
+    );
+}
+
+#[tokio::test]
+#[ignore]
+async fn v1_messages_with_tools_no_tool_choice_does_not_force_tool_use() {
+    let app = build_app().await;
+
+    let body = serde_json::json!({
+        "model": "global.anthropic.claude-sonnet-4-20250514-v1",
+        "max_tokens": 64,
+        "stream": true,
+        "tools": [
+            {
+                "name": "get_weather",
+                "description": "Get the current weather for a location.",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "location": {"type": "string"}
+                    },
+                    "required": ["location"]
+                }
+            }
+        ],
+        "messages": [
+            {"role": "user", "content": "Say hi in exactly one word."}
+        ]
+    });
+
+    let request = axum::http::Request::builder()
+        .method("POST")
+        .uri("/v1/messages")
+        .header("content-type", "application/json")
+        .body(Body::from(serde_json::to_vec(&body).unwrap()))
+        .unwrap();
+
+    let response = app.oneshot(request).await.unwrap();
+    assert_eq!(response.status(), 200);
+
+    let body_bytes = response.into_body().collect().await.unwrap().to_bytes();
+    let body_str = String::from_utf8(body_bytes.to_vec()).unwrap();
+
+    let events = parse_sse_events(&body_str);
+    let event_types: Vec<&str> = events.iter().map(|(e, _)| e.as_str()).collect();
+
+    assert!(
+        event_types.contains(&"message_start"),
+        "missing message_start, got: {event_types:?}"
+    );
+    assert!(
+        event_types.contains(&"message_stop"),
+        "missing message_stop, got: {event_types:?}"
+    );
+
+    let stop_reason = events
+        .iter()
+        .find(|(e, _)| e == "message_delta")
+        .and_then(|(_, data)| serde_json::from_str::<serde_json::Value>(data).ok())
+        .and_then(|v| v.get("delta").cloned())
+        .and_then(|d| d.get("stop_reason").cloned())
+        .and_then(|r| r.as_str().map(|s| s.to_string()));
+
+    assert_eq!(
+        stop_reason.as_deref(),
+        Some("end_turn"),
+        "expected end_turn (no forced tool use), got: {stop_reason:?}"
+    );
+}
+
+#[tokio::test]
+#[ignore]
+async fn v1_messages_with_tool_choice_any_forces_tool_use() {
+    let app = build_app().await;
+
+    let body = serde_json::json!({
+        "model": "global.anthropic.claude-sonnet-4-20250514-v1",
+        "max_tokens": 256,
+        "stream": true,
+        "tools": [
+            {
+                "name": "get_weather",
+                "description": "Get the current weather for a location.",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "location": {"type": "string"}
+                    },
+                    "required": ["location"]
+                }
+            }
+        ],
+        "tool_choice": {"type": "any"},
+        "messages": [
+            {"role": "user", "content": "Say hi in exactly one word."}
+        ]
+    });
+
+    let request = axum::http::Request::builder()
+        .method("POST")
+        .uri("/v1/messages")
+        .header("content-type", "application/json")
+        .body(Body::from(serde_json::to_vec(&body).unwrap()))
+        .unwrap();
+
+    let response = app.oneshot(request).await.unwrap();
+    assert_eq!(response.status(), 200);
+
+    let body_bytes = response.into_body().collect().await.unwrap().to_bytes();
+    let body_str = String::from_utf8(body_bytes.to_vec()).unwrap();
+
+    let events = parse_sse_events(&body_str);
+    let event_types: Vec<&str> = events.iter().map(|(e, _)| e.as_str()).collect();
+
+    assert!(
+        event_types.contains(&"message_start"),
+        "missing message_start, got: {event_types:?}"
+    );
+    assert!(
+        event_types.contains(&"message_stop"),
+        "missing message_stop, got: {event_types:?}"
+    );
+
+    let stop_reason = events
+        .iter()
+        .find(|(e, _)| e == "message_delta")
+        .and_then(|(_, data)| serde_json::from_str::<serde_json::Value>(data).ok())
+        .and_then(|v| v.get("delta").cloned())
+        .and_then(|d| d.get("stop_reason").cloned())
+        .and_then(|r| r.as_str().map(|s| s.to_string()));
+
+    assert_eq!(
+        stop_reason.as_deref(),
+        Some("tool_use"),
+        "expected tool_use with tool_choice any, got: {stop_reason:?}"
+    );
+}
+
+#[tokio::test]
+#[ignore]
 async fn v1_messages_tool_result_with_image_and_cache_control() {
     let app = build_app().await;
 
@@ -417,4 +608,95 @@ async fn v1_messages_tool_result_with_image_and_cache_control() {
     );
     assert_eq!(event_types.first(), Some(&"message_start"));
     assert_eq!(event_types.last(), Some(&"message_stop"));
+}
+
+#[tokio::test]
+#[ignore]
+async fn v1_messages_count_tokens_with_tools() {
+    let app = build_app().await;
+
+    let body = serde_json::json!({
+        "model": "global.anthropic.claude-sonnet-4-20250514-v1",
+        "tools": [
+            {
+                "name": "get_weather",
+                "description": "Get the current weather for a location.",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "location": {"type": "string"}
+                    },
+                    "required": ["location"]
+                }
+            }
+        ],
+        "messages": [
+            {"role": "user", "content": "What is the weather in London?"}
+        ]
+    });
+
+    let request = axum::http::Request::builder()
+        .method("POST")
+        .uri("/v1/messages/count_tokens")
+        .header("content-type", "application/json")
+        .body(Body::from(serde_json::to_vec(&body).unwrap()))
+        .unwrap();
+
+    let response = app.oneshot(request).await.unwrap();
+    assert_eq!(response.status(), 200);
+
+    let body_bytes = response.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+
+    let input_tokens = json["input_tokens"].as_i64().unwrap();
+    assert!(
+        input_tokens > 0,
+        "expected input_tokens > 0, got: {input_tokens}"
+    );
+}
+
+#[tokio::test]
+#[ignore]
+async fn v1_messages_count_tokens_with_tools_and_tool_choice() {
+    let app = build_app().await;
+
+    let body = serde_json::json!({
+        "model": "global.anthropic.claude-sonnet-4-20250514-v1",
+        "tools": [
+            {
+                "name": "get_weather",
+                "description": "Get the current weather for a location.",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "location": {"type": "string"}
+                    },
+                    "required": ["location"]
+                }
+            }
+        ],
+        "tool_choice": {"type": "any"},
+        "messages": [
+            {"role": "user", "content": "What is the weather in London?"}
+        ]
+    });
+
+    let request = axum::http::Request::builder()
+        .method("POST")
+        .uri("/v1/messages/count_tokens")
+        .header("content-type", "application/json")
+        .body(Body::from(serde_json::to_vec(&body).unwrap()))
+        .unwrap();
+
+    let response = app.oneshot(request).await.unwrap();
+    assert_eq!(response.status(), 200);
+
+    let body_bytes = response.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+
+    let input_tokens = json["input_tokens"].as_i64().unwrap();
+    assert!(
+        input_tokens > 0,
+        "expected input_tokens > 0, got: {input_tokens}"
+    );
 }

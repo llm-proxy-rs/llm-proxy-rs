@@ -31,6 +31,10 @@ pub struct V1MessagesRequest {
     pub messages: Messages,
     pub model: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stop_sequences: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub stream: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub system: Option<Systems>,
@@ -39,7 +43,13 @@ pub struct V1MessagesRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub thinking: Option<Thinking>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_choice: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub tools: Option<Vec<Tool>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub top_k: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub top_p: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub output_config: Option<OutputConfig>,
 }
@@ -165,7 +175,7 @@ mod tests {
 
         // tools with cache control
         let tools = request.tools.as_ref().unwrap();
-        let bedrock_tools = tool::tools_to_bedrock_tools(tools).unwrap().unwrap();
+        let bedrock_tools = tool::build_bedrock_tools(tools).unwrap().unwrap();
         assert_eq!(bedrock_tools.len(), 2);
         match &bedrock_tools[0] {
             BedrockTool::ToolSpec(spec) => assert_eq!(spec.name(), "analyze_image"),

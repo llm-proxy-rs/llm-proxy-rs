@@ -24,7 +24,7 @@ impl Default for ContentBlockDelta {
     }
 }
 
-pub fn bedrock_content_block_delta_to_content_block_delta(
+pub fn convert_bedrock_content_block_delta(
     delta: &BedrockContentBlockDelta,
 ) -> Option<ContentBlockDelta> {
     match delta {
