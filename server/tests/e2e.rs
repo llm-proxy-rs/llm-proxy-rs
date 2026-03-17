@@ -6,6 +6,8 @@ use server::{AppState, get_app};
 use std::sync::Arc;
 use tower::ServiceExt;
 
+const MODEL: &str = "global.anthropic.claude-opus-4-6-v1";
+
 async fn build_app() -> axum::Router {
     let config = aws_config::load_defaults(BehaviorVersion::latest()).await;
     let client = Client::new(&config);
@@ -49,7 +51,7 @@ async fn v1_messages_returns_complete_sse_stream() {
     let app = build_app().await;
 
     let body = serde_json::json!({
-        "model": "global.anthropic.claude-opus-4-6-v1",
+        "model": MODEL,
         "max_tokens": 64,
         "stream": true,
         "messages": [
@@ -109,7 +111,7 @@ async fn chat_completions_returns_complete_sse_stream() {
     let app = build_app().await;
 
     let body = serde_json::json!({
-        "model": "global.anthropic.claude-opus-4-6-v1",
+        "model": MODEL,
         "max_tokens": 64,
         "stream": true,
         "messages": [
@@ -165,7 +167,7 @@ async fn v1_messages_count_tokens_returns_token_count() {
     let app = build_app().await;
 
     let body = serde_json::json!({
-        "model": "global.anthropic.claude-opus-4-6-v1",
+        "model": MODEL,
         "messages": [
             {"role": "user", "content": "Hello, world!"}
         ]
@@ -197,7 +199,7 @@ async fn v1_messages_with_context_1m_beta() {
     let app = build_app().await;
 
     let body = serde_json::json!({
-        "model": "global.anthropic.claude-opus-4-6-v1",
+        "model": MODEL,
         "max_tokens": 64,
         "stream": true,
         "messages": [
@@ -240,7 +242,7 @@ async fn v1_messages_with_tool_reference_content() {
     let app = build_app().await;
 
     let body = serde_json::json!({
-        "model": "global.anthropic.claude-opus-4-6-v1",
+        "model": MODEL,
         "max_tokens": 64,
         "stream": true,
         "tools": [
@@ -323,7 +325,7 @@ async fn v1_messages_with_thinking_disabled() {
     let app = build_app().await;
 
     let body = serde_json::json!({
-        "model": "global.anthropic.claude-sonnet-4-20250514-v1",
+        "model": MODEL,
         "max_tokens": 64,
         "stream": true,
         "thinking": {"type": "disabled"},
@@ -379,7 +381,7 @@ async fn v1_messages_with_tools_no_tool_choice_does_not_force_tool_use() {
     let app = build_app().await;
 
     let body = serde_json::json!({
-        "model": "global.anthropic.claude-sonnet-4-20250514-v1",
+        "model": MODEL,
         "max_tokens": 64,
         "stream": true,
         "tools": [
@@ -446,7 +448,7 @@ async fn v1_messages_with_tool_choice_any_forces_tool_use() {
     let app = build_app().await;
 
     let body = serde_json::json!({
-        "model": "global.anthropic.claude-sonnet-4-20250514-v1",
+        "model": MODEL,
         "max_tokens": 256,
         "stream": true,
         "tools": [
@@ -516,7 +518,7 @@ async fn v1_messages_tool_result_with_image_and_cache_control() {
     let tiny_png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
 
     let body = serde_json::json!({
-        "model": "global.anthropic.claude-opus-4-6-v1",
+        "model": MODEL,
         "max_tokens": 64,
         "stream": true,
         "system": [
@@ -616,7 +618,7 @@ async fn v1_messages_count_tokens_with_tools() {
     let app = build_app().await;
 
     let body = serde_json::json!({
-        "model": "global.anthropic.claude-sonnet-4-20250514-v1",
+        "model": MODEL,
         "tools": [
             {
                 "name": "get_weather",
@@ -661,7 +663,7 @@ async fn v1_messages_count_tokens_with_tools_and_tool_choice() {
     let app = build_app().await;
 
     let body = serde_json::json!({
-        "model": "global.anthropic.claude-sonnet-4-20250514-v1",
+        "model": MODEL,
         "tools": [
             {
                 "name": "get_weather",
