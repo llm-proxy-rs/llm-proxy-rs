@@ -1,6 +1,7 @@
+use anyhow::{Result, bail};
 use aws_sdk_bedrockruntime::types::{
-    AutoToolChoice, CachePointBlock, Tool as BedrockTool, ToolChoice, ToolConfiguration,
-    ToolInputSchema, ToolSpecification,
+    AnyToolChoice, AutoToolChoice, CachePointBlock, SpecificToolChoice, Tool as BedrockTool,
+    ToolChoice, ToolConfiguration, ToolInputSchema, ToolSpecification,
 };
 use common::value_to_document;
 use serde::{Deserialize, Serialize};
@@ -73,16 +74,41 @@ pub fn build_bedrock_tools(tools: &[Tool]) -> anyhow::Result<Option<Vec<BedrockT
     })
 }
 
-pub fn build_tool_configuration(tools: &[Tool]) -> anyhow::Result<Option<ToolConfiguration>> {
+pub fn tool_choice_from_value(value: &serde_json::Value) -> Result<Option<ToolChoice>> {
+    match value.get("type").and_then(|t| t.as_str()) {
+        Some("none") | None => Ok(None),
+        Some("auto") => Ok(Some(ToolChoice::Auto(AutoToolChoice::builder().build()))),
+        Some("any") => Ok(Some(ToolChoice::Any(AnyToolChoice::builder().build()))),
+        Some("tool") => {
+            let name = value
+                .get("name")
+                .and_then(|n| n.as_str())
+                .unwrap_or_default();
+            Ok(Some(ToolChoice::Tool(
+                SpecificToolChoice::builder().name(name).build()?,
+            )))
+        }
+        Some(other) => bail!("Unsupported tool_choice type: {other}"),
+    }
+}
+
+pub fn build_tool_configuration(
+    tools: &[Tool],
+    tool_choice: Option<&serde_json::Value>,
+) -> Result<Option<ToolConfiguration>> {
     let bedrock_tools = build_bedrock_tools(tools)?;
 
     bedrock_tools
         .map(|tools| {
+            let choice = tool_choice
+                .map(tool_choice_from_value)
+                .transpose()?
+                .flatten();
             ToolConfiguration::builder()
                 .set_tools(Some(tools))
-                .tool_choice(ToolChoice::Auto(AutoToolChoice::builder().build()))
+                .set_tool_choice(choice)
                 .build()
-                .map_err(Into::into)
+                .map_err(anyhow::Error::from)
         })
         .transpose()
 }
@@ -169,7 +195,7 @@ mod tests {
             input_schema: serde_json::json!({"type": "object"}),
             name: "my_tool".to_string(),
         }];
-        let config = build_tool_configuration(&tools).unwrap().unwrap();
+        let config = build_tool_configuration(&tools, None).unwrap().unwrap();
         assert_eq!(config.tools().len(), 2);
         match &config.tools()[0] {
             BedrockTool::ToolSpec(spec) => assert_eq!(spec.name(), "my_tool"),

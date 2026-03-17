@@ -1,33 +1,10 @@
-use anthropic_request::{V1MessagesRequest, build_bedrock_tools};
-use anyhow::{Result, bail};
+use anthropic_request::{V1MessagesRequest, build_tool_configuration};
+use anyhow::Result;
 use aws_sdk_bedrockruntime::types::{
-    AnyToolChoice, AutoToolChoice, InferenceConfiguration, OutputConfig as BedrockOutputConfig,
-    SpecificToolChoice, SystemContentBlock, ToolChoice as BedrockToolChoice, ToolConfiguration,
+    InferenceConfiguration, OutputConfig as BedrockOutputConfig, SystemContentBlock,
 };
 
 use crate::bedrock::BedrockChatCompletion;
-
-fn tool_choice_from_value(value: &serde_json::Value) -> Result<Option<BedrockToolChoice>> {
-    match value.get("type").and_then(|t| t.as_str()) {
-        Some("none") | None => Ok(None),
-        Some("auto") => Ok(Some(BedrockToolChoice::Auto(
-            AutoToolChoice::builder().build(),
-        ))),
-        Some("any") => Ok(Some(BedrockToolChoice::Any(
-            AnyToolChoice::builder().build(),
-        ))),
-        Some("tool") => {
-            let name = value
-                .get("name")
-                .and_then(|n| n.as_str())
-                .unwrap_or_default();
-            Ok(Some(BedrockToolChoice::Tool(
-                SpecificToolChoice::builder().name(name).build()?,
-            )))
-        }
-        Some(other) => bail!("Unsupported tool_choice type: {other}"),
-    }
-}
 
 impl TryFrom<&V1MessagesRequest> for BedrockChatCompletion {
     type Error = anyhow::Error;
@@ -44,23 +21,9 @@ impl TryFrom<&V1MessagesRequest> for BedrockChatCompletion {
         let tool_config = request
             .tools
             .as_deref()
-            .map(build_bedrock_tools)
+            .map(|tools| build_tool_configuration(tools, request.tool_choice.as_ref()))
             .transpose()?
-            .flatten()
-            .map(|tools| {
-                let choice = request
-                    .tool_choice
-                    .as_ref()
-                    .map(tool_choice_from_value)
-                    .transpose()?
-                    .flatten();
-                ToolConfiguration::builder()
-                    .set_tools(Some(tools))
-                    .set_tool_choice(choice)
-                    .build()
-                    .map_err(anyhow::Error::from)
-            })
-            .transpose()?;
+            .flatten();
 
         let inference_config = InferenceConfiguration::builder()
             .max_tokens(request.max_tokens)

@@ -296,7 +296,7 @@ impl V1MessagesProvider for BedrockV1MessagesProvider {
         let tool_config = request
             .tools
             .as_deref()
-            .map(build_tool_configuration)
+            .map(|tools| build_tool_configuration(tools, request.tool_choice.as_ref()))
             .transpose()?
             .flatten();
 
