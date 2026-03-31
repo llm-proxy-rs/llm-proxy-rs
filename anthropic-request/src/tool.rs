@@ -1,4 +1,4 @@
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use aws_sdk_bedrockruntime::types::{
     AnyToolChoice, AutoToolChoice, CachePointBlock, SpecificToolChoice, Tool as BedrockTool,
     ToolChoice, ToolConfiguration, ToolInputSchema, ToolSpecification,
@@ -83,7 +83,7 @@ pub fn tool_choice_from_value(value: &serde_json::Value) -> Result<Option<ToolCh
             let name = value
                 .get("name")
                 .and_then(|n| n.as_str())
-                .unwrap_or_default();
+                .context("tool_choice type 'tool' requires a 'name' field")?;
             Ok(Some(ToolChoice::Tool(
                 SpecificToolChoice::builder().name(name).build()?,
             )))
@@ -202,5 +202,22 @@ mod tests {
             other => panic!("expected ToolSpec, got {:?}", other),
         }
         assert!(matches!(config.tools()[1], BedrockTool::CachePoint(_)));
+    }
+
+    #[test]
+    fn tool_choice_tool_with_name() {
+        let value = serde_json::json!({"type": "tool", "name": "get_weather"});
+        let choice = tool_choice_from_value(&value).unwrap().unwrap();
+        match choice {
+            ToolChoice::Tool(specific) => assert_eq!(specific.name(), "get_weather"),
+            other => panic!("expected ToolChoice::Tool, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn tool_choice_tool_without_name_errors() {
+        let value = serde_json::json!({"type": "tool"});
+        let result = tool_choice_from_value(&value);
+        assert!(result.is_err());
     }
 }

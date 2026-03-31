@@ -163,6 +163,74 @@ async fn chat_completions_returns_complete_sse_stream() {
 
 #[tokio::test]
 #[ignore]
+async fn v1_messages_with_tools_missing_referenced_tool() {
+    let app = build_app().await;
+
+    // tools defines "search" but messages reference "get_weather" which is not in tools
+    let body = serde_json::json!({
+        "model": MODEL,
+        "max_tokens": 64,
+        "stream": true,
+        "tools": [
+            {
+                "name": "search",
+                "description": "Search the web.",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string"}
+                    },
+                    "required": ["query"]
+                }
+            }
+        ],
+        "messages": [
+            {
+                "role": "user",
+                "content": "What's the weather?"
+            },
+            {
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "id": "tooluse_missing1",
+                        "name": "get_weather",
+                        "input": {"city": "NYC"}
+                    }
+                ]
+            },
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "tooluse_missing1",
+                        "content": "Sunny, 72°F"
+                    }
+                ]
+            }
+        ]
+    });
+
+    let request = axum::http::Request::builder()
+        .method("POST")
+        .uri("/v1/messages")
+        .header("content-type", "application/json")
+        .body(Body::from(serde_json::to_vec(&body).unwrap()))
+        .unwrap();
+
+    let response = app.oneshot(request).await.unwrap();
+
+    let status = response.status();
+    let body_bytes = response.into_body().collect().await.unwrap().to_bytes();
+    let body_str = String::from_utf8(body_bytes.to_vec()).unwrap();
+
+    println!("status: {status}, body: {body_str}");
+}
+
+#[tokio::test]
+#[ignore]
 async fn v1_messages_count_tokens_returns_token_count() {
     let app = build_app().await;
 
@@ -701,4 +769,236 @@ async fn v1_messages_count_tokens_with_tools_and_tool_choice() {
         input_tokens > 0,
         "expected input_tokens > 0, got: {input_tokens}"
     );
+}
+
+#[tokio::test]
+#[ignore]
+async fn v1_messages_with_tool_result_but_no_tools_field() {
+    let app = build_app().await;
+
+    let body = serde_json::json!({
+        "model": MODEL,
+        "max_tokens": 64,
+        "stream": true,
+        "messages": [
+            {
+                "role": "user",
+                "content": "What's the weather?"
+            },
+            {
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "id": "tooluse_inject1",
+                        "name": "get_weather",
+                        "input": {"city": "NYC"}
+                    }
+                ]
+            },
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "tooluse_inject1",
+                        "content": "Sunny, 72°F"
+                    }
+                ]
+            }
+        ]
+    });
+
+    let request = axum::http::Request::builder()
+        .method("POST")
+        .uri("/v1/messages")
+        .header("content-type", "application/json")
+        .body(Body::from(serde_json::to_vec(&body).unwrap()))
+        .unwrap();
+
+    let response = app.oneshot(request).await.unwrap();
+
+    let status = response.status();
+    let body_bytes = response.into_body().collect().await.unwrap().to_bytes();
+    let body_str = String::from_utf8(body_bytes.to_vec()).unwrap();
+    assert_eq!(status, 200, "response body: {body_str}");
+
+    let events = parse_sse_events(&body_str);
+    let event_types: Vec<&str> = events.iter().map(|(e, _)| e.as_str()).collect();
+
+    assert!(
+        event_types.contains(&"message_start"),
+        "missing message_start, got: {event_types:?}"
+    );
+    assert!(
+        event_types.contains(&"message_stop"),
+        "missing message_stop, got: {event_types:?}"
+    );
+    assert_eq!(event_types.first(), Some(&"message_start"));
+    assert_eq!(event_types.last(), Some(&"message_stop"));
+}
+
+#[tokio::test]
+#[ignore]
+async fn chat_completions_with_tool_messages_but_no_tools_field() {
+    let app = build_app().await;
+
+    let body = serde_json::json!({
+        "model": MODEL,
+        "max_tokens": 64,
+        "stream": true,
+        "messages": [
+            {
+                "role": "user",
+                "content": "What's the weather?"
+            },
+            {
+                "role": "assistant",
+                "content": null,
+                "tool_calls": [
+                    {
+                        "id": "call_inject1",
+                        "type": "function",
+                        "function": {
+                            "name": "get_weather",
+                            "arguments": "{\"city\":\"NYC\"}"
+                        }
+                    }
+                ]
+            },
+            {
+                "role": "tool",
+                "tool_call_id": "call_inject1",
+                "content": "Sunny, 72°F"
+            }
+        ]
+    });
+
+    let request = axum::http::Request::builder()
+        .method("POST")
+        .uri("/chat/completions")
+        .header("content-type", "application/json")
+        .body(Body::from(serde_json::to_vec(&body).unwrap()))
+        .unwrap();
+
+    let response = app.oneshot(request).await.unwrap();
+
+    let status = response.status();
+    let body_bytes = response.into_body().collect().await.unwrap().to_bytes();
+    let body_str = String::from_utf8(body_bytes.to_vec()).unwrap();
+    assert_eq!(status, 200, "response body: {body_str}");
+
+    let events = parse_sse_events(&body_str);
+    let data_values: Vec<&str> = events.iter().map(|(_, d)| d.as_str()).collect();
+
+    assert!(
+        data_values.contains(&"[DONE]"),
+        "missing [DONE] sentinel, got: {data_values:?}"
+    );
+
+    assert!(
+        data_values.len() >= 2,
+        "expected at least 2 events (chunk + DONE), got: {}",
+        data_values.len()
+    );
+
+    for data in &data_values {
+        if *data != "[DONE]" {
+            let parsed: serde_json::Value = serde_json::from_str(data)
+                .unwrap_or_else(|e| panic!("invalid JSON in SSE data: {e}\ndata: {data}"));
+            assert!(
+                parsed.get("id").is_some(),
+                "chunk missing 'id' field: {parsed}"
+            );
+        }
+    }
+}
+
+#[tokio::test]
+#[ignore]
+async fn v1_messages_with_tools_config_missing_referenced_tool_multiple_rounds() {
+    let app = build_app().await;
+
+    // tools config defines "search" only, but messages reference "bash" which is not in tools
+    let body = serde_json::json!({
+        "model": MODEL,
+        "max_tokens": 64,
+        "stream": true,
+        "tools": [
+            {
+                "name": "search",
+                "description": "Search the web.",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string"}
+                    },
+                    "required": ["query"]
+                }
+            }
+        ],
+        "messages": [
+            {
+                "role": "user",
+                "content": "List files then check disk usage."
+            },
+            {
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "id": "tooluse_bash1",
+                        "name": "bash",
+                        "input": {"command": "ls -la"}
+                    }
+                ]
+            },
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "tooluse_bash1",
+                        "content": "total 42\ndrwxr-xr-x  5 user staff 160 Jan  1 00:00 .\ndrwxr-xr-x  3 user staff  96 Jan  1 00:00 ..\n-rw-r--r--  1 user staff 1024 Jan  1 00:00 file.txt"
+                    }
+                ]
+            },
+            {
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "id": "tooluse_bash2",
+                        "name": "bash",
+                        "input": {"command": "df -h"}
+                    }
+                ]
+            },
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "tooluse_bash2",
+                        "content": "Filesystem      Size  Used Avail Use% Mounted on\n/dev/sda1       100G   50G   50G  50% /"
+                    }
+                ]
+            }
+        ]
+    });
+
+    let request = axum::http::Request::builder()
+        .method("POST")
+        .uri("/v1/messages")
+        .header("content-type", "application/json")
+        .body(Body::from(serde_json::to_vec(&body).unwrap()))
+        .unwrap();
+
+    let response = app.oneshot(request).await.unwrap();
+
+    let status = response.status();
+    let body_bytes = response.into_body().collect().await.unwrap().to_bytes();
+    let body_str = String::from_utf8(body_bytes.to_vec()).unwrap();
+
+    println!("status: {status}, body: {body_str}");
 }
