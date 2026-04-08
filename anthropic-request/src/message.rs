@@ -2,6 +2,7 @@ use aws_sdk_bedrockruntime::types::{ContentBlock, ConversationRole, Message as B
 use serde::{Deserialize, Serialize};
 
 use crate::content::{AssistantContents, UserContents};
+use crate::document_source::DocumentCounter;
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(untagged)]
@@ -19,13 +20,11 @@ pub enum Message {
     User { content: UserContents },
 }
 
-impl TryFrom<&Message> for BedrockMessage {
-    type Error = anyhow::Error;
-
-    fn try_from(message: &Message) -> Result<Self, Self::Error> {
-        match message {
+impl Message {
+    pub fn to_bedrock_message(&self, counter: &DocumentCounter) -> anyhow::Result<BedrockMessage> {
+        match self {
             Message::User { content } => {
-                let all_content_blocks = Vec::try_from(content)?;
+                let all_content_blocks = content.to_content_blocks(counter)?;
                 let (tool_result_content_blocks, others_content_blocks): (Vec<_>, Vec<_>) =
                     all_content_blocks
                         .into_iter()
@@ -56,6 +55,7 @@ impl TryFrom<&Messages> for Option<Vec<BedrockMessage>> {
     type Error = anyhow::Error;
 
     fn try_from(messages: &Messages) -> Result<Self, Self::Error> {
+        let counter = DocumentCounter::new();
         let bedrock_messages: Vec<BedrockMessage> = match messages {
             Messages::String(s) => {
                 let content = vec![ContentBlock::Text(s.clone())];
@@ -68,7 +68,7 @@ impl TryFrom<&Messages> for Option<Vec<BedrockMessage>> {
             }
             Messages::Array(a) => a
                 .iter()
-                .map(BedrockMessage::try_from)
+                .map(|m| m.to_bedrock_message(&counter))
                 .collect::<Result<_, _>>()?,
         };
 
@@ -94,7 +94,7 @@ mod tests {
             ]
         });
         let message: Message = serde_json::from_value(json).unwrap();
-        let bedrock = BedrockMessage::try_from(&message).unwrap();
+        let bedrock = message.to_bedrock_message(&DocumentCounter::new()).unwrap();
         let content = bedrock.content();
         assert_eq!(content.len(), 2);
         match &content[0] {
@@ -117,7 +117,7 @@ mod tests {
             ]
         });
         let message: Message = serde_json::from_value(json).unwrap();
-        let bedrock = BedrockMessage::try_from(&message).unwrap();
+        let bedrock = message.to_bedrock_message(&DocumentCounter::new()).unwrap();
         assert_eq!(bedrock.role(), &ConversationRole::User);
         assert_eq!(bedrock.content().len(), 3);
         match &bedrock.content()[0] {
@@ -140,7 +140,7 @@ mod tests {
             ]
         });
         let message: Message = serde_json::from_value(json).unwrap();
-        let bedrock = BedrockMessage::try_from(&message).unwrap();
+        let bedrock = message.to_bedrock_message(&DocumentCounter::new()).unwrap();
         assert_eq!(bedrock.role(), &ConversationRole::Assistant);
         assert_eq!(bedrock.content().len(), 2);
         match &bedrock.content()[0] {

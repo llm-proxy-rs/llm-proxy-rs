@@ -1,10 +1,8 @@
-use aws_sdk_bedrockruntime::types::{
-    ContentBlock, DocumentBlock, ImageBlock, ToolResultBlock, ToolResultStatus,
-};
+use aws_sdk_bedrockruntime::types::{ContentBlock, ImageBlock, ToolResultBlock, ToolResultStatus};
 use serde::{Deserialize, Serialize};
 
 use crate::cache_control::CacheControl;
-use crate::document_source::DocumentSource;
+use crate::document_source::{DocumentCounter, DocumentSource};
 use crate::image_source::ImageSource;
 use crate::tool_result_content::ToolResultContents;
 
@@ -49,15 +47,16 @@ pub enum UserContent {
     },
 }
 
-impl TryFrom<&UserContents> for Vec<ContentBlock> {
-    type Error = anyhow::Error;
-
-    fn try_from(contents: &UserContents) -> Result<Self, Self::Error> {
-        match contents {
+impl UserContents {
+    pub fn to_content_blocks(
+        &self,
+        counter: &DocumentCounter,
+    ) -> anyhow::Result<Vec<ContentBlock>> {
+        match self {
             UserContents::String(s) => Ok(vec![ContentBlock::Text(s.clone())]),
             UserContents::Array(arr) => Ok(arr
                 .iter()
-                .map(Option::<Vec<_>>::try_from)
+                .map(|c| c.to_content_blocks(counter))
                 .collect::<Result<Vec<_>, _>>()?
                 .into_iter()
                 .flatten()
@@ -67,11 +66,12 @@ impl TryFrom<&UserContents> for Vec<ContentBlock> {
     }
 }
 
-impl TryFrom<&UserContent> for Option<Vec<ContentBlock>> {
-    type Error = anyhow::Error;
-
-    fn try_from(content: &UserContent) -> Result<Self, Self::Error> {
-        match content {
+impl UserContent {
+    fn to_content_blocks(
+        &self,
+        counter: &DocumentCounter,
+    ) -> anyhow::Result<Option<Vec<ContentBlock>>> {
+        match self {
             UserContent::Text {
                 text,
                 cache_control,
@@ -89,7 +89,7 @@ impl TryFrom<&UserContent> for Option<Vec<ContentBlock>> {
                 ImageBlock::try_from(source)?,
             )])),
             UserContent::Document { source } => {
-                let document_block = DocumentBlock::try_from(source)?;
+                let document_block = source.to_document_block(counter)?;
                 Ok(Some(vec![
                     ContentBlock::Document(document_block),
                     ContentBlock::Text(" ".into()),
@@ -104,7 +104,7 @@ impl TryFrom<&UserContent> for Option<Vec<ContentBlock>> {
                 let tool_result_block = ToolResultBlock::builder()
                     .tool_use_id(tool_use_id)
                     .set_content(Some(match content {
-                        Some(c) => c.try_into()?,
+                        Some(c) => c.to_tool_result_content_blocks(counter)?,
                         None => vec![],
                     }))
                     .set_status(is_error.map(|is_error| {
@@ -143,7 +143,7 @@ mod tests {
             {"type": "image", "source": {"type": "base64", "media_type": "image/bmp", "data": ""}}
         ]);
         let contents: UserContents = serde_json::from_value(json).unwrap();
-        assert!(Vec::<ContentBlock>::try_from(&contents).is_err());
+        assert!(contents.to_content_blocks(&DocumentCounter::new()).is_err());
     }
 
     #[test]
@@ -155,7 +155,7 @@ mod tests {
             {"type": "document", "source": {"type": "base64", "media_type": "application/pdf", "data": data}}
         ]);
         let contents: UserContents = serde_json::from_value(json).unwrap();
-        let blocks = Vec::<ContentBlock>::try_from(&contents).unwrap();
+        let blocks = contents.to_content_blocks(&DocumentCounter::new()).unwrap();
         assert_eq!(blocks.len(), 2);
         assert!(matches!(blocks[0], ContentBlock::Document(_)));
         assert!(matches!(blocks[1], ContentBlock::Text(_)));
@@ -167,7 +167,7 @@ mod tests {
             {"type": "text", "text": "cached text", "cache_control": {"type": "ephemeral"}}
         ]);
         let contents: UserContents = serde_json::from_value(json).unwrap();
-        let blocks = Vec::<ContentBlock>::try_from(&contents).unwrap();
+        let blocks = contents.to_content_blocks(&DocumentCounter::new()).unwrap();
         assert_eq!(blocks.len(), 2);
         match &blocks[0] {
             ContentBlock::Text(text) => assert_eq!(text, "cached text"),
@@ -182,9 +182,26 @@ mod tests {
             {"type": "tool_result", "tool_use_id": "t1"}
         ]);
         let contents: UserContents = serde_json::from_value(json).unwrap();
-        let blocks = Vec::<ContentBlock>::try_from(&contents).unwrap();
+        let blocks = contents.to_content_blocks(&DocumentCounter::new()).unwrap();
         assert_eq!(blocks.len(), 1);
         assert!(matches!(blocks[0], ContentBlock::ToolResult(_)));
+    }
+
+    #[test]
+    fn document_without_title_gets_auto_name() {
+        use base64::{Engine as _, engine::general_purpose};
+
+        let data = general_purpose::STANDARD.encode(b"%PDF-1.4");
+        let json = serde_json::json!([
+            {"type": "document", "source": {"type": "base64", "media_type": "application/pdf", "data": data}}
+        ]);
+        let contents: UserContents = serde_json::from_value(json).unwrap();
+        let blocks = contents.to_content_blocks(&DocumentCounter::new()).unwrap();
+        assert_eq!(blocks.len(), 2);
+        match &blocks[0] {
+            ContentBlock::Document(doc) => assert!(doc.name().starts_with("document_")),
+            other => panic!("expected Document, got {:?}", other),
+        }
     }
 
     #[test]
@@ -198,7 +215,7 @@ mod tests {
             }
         ]);
         let contents: UserContents = serde_json::from_value(json).unwrap();
-        let blocks = Vec::<ContentBlock>::try_from(&contents).unwrap();
+        let blocks = contents.to_content_blocks(&DocumentCounter::new()).unwrap();
         assert_eq!(blocks.len(), 2);
         match &blocks[0] {
             ContentBlock::ToolResult(result) => assert_eq!(result.tool_use_id(), "t1"),

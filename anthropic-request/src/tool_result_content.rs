@@ -1,8 +1,8 @@
-use aws_sdk_bedrockruntime::types::{DocumentBlock, ImageBlock, ToolResultContentBlock};
+use aws_sdk_bedrockruntime::types::{ImageBlock, ToolResultContentBlock};
 use aws_smithy_types::Document;
 use serde::{Deserialize, Serialize};
 
-use crate::document_source::DocumentSource;
+use crate::document_source::{DocumentCounter, DocumentSource};
 use crate::image_source::ImageSource;
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -27,13 +27,14 @@ pub enum ToolResultContent {
     Unknown,
 }
 
-impl TryFrom<&ToolResultContent> for Option<ToolResultContentBlock> {
-    type Error = anyhow::Error;
-
-    fn try_from(content: &ToolResultContent) -> Result<Self, Self::Error> {
-        match content {
+impl ToolResultContent {
+    fn to_tool_result_content_block(
+        &self,
+        counter: &DocumentCounter,
+    ) -> anyhow::Result<Option<ToolResultContentBlock>> {
+        match self {
             ToolResultContent::Document { source } => Ok(Some(ToolResultContentBlock::Document(
-                DocumentBlock::try_from(source)?,
+                source.to_document_block(counter)?,
             ))),
             ToolResultContent::Text { text } => {
                 Ok(Some(ToolResultContentBlock::Text(text.clone())))
@@ -59,15 +60,16 @@ impl TryFrom<&ToolResultContent> for Option<ToolResultContentBlock> {
     }
 }
 
-impl TryFrom<&ToolResultContents> for Vec<ToolResultContentBlock> {
-    type Error = anyhow::Error;
-
-    fn try_from(contents: &ToolResultContents) -> Result<Self, Self::Error> {
-        match contents {
+impl ToolResultContents {
+    pub fn to_tool_result_content_blocks(
+        &self,
+        counter: &DocumentCounter,
+    ) -> anyhow::Result<Vec<ToolResultContentBlock>> {
+        match self {
             ToolResultContents::String(s) => Ok(vec![ToolResultContentBlock::Text(s.clone())]),
             ToolResultContents::Array(a) => a
                 .iter()
-                .map(Option::<ToolResultContentBlock>::try_from)
+                .map(|c| c.to_tool_result_content_block(counter))
                 .collect::<Result<Vec<_>, _>>()
                 .map(|v| v.into_iter().flatten().collect()),
         }
@@ -91,7 +93,9 @@ mod tests {
             }
         ]);
         let contents: ToolResultContents = serde_json::from_value(json).unwrap();
-        let blocks = Vec::<ToolResultContentBlock>::try_from(&contents).unwrap();
+        let blocks = contents
+            .to_tool_result_content_blocks(&DocumentCounter::new())
+            .unwrap();
         assert_eq!(blocks.len(), 1);
         assert!(matches!(blocks[0], ToolResultContentBlock::Image(_)));
     }
@@ -110,7 +114,9 @@ mod tests {
             }
         ]);
         let contents: ToolResultContents = serde_json::from_value(json).unwrap();
-        let blocks = Vec::<ToolResultContentBlock>::try_from(&contents).unwrap();
+        let blocks = contents
+            .to_tool_result_content_blocks(&DocumentCounter::new())
+            .unwrap();
         assert_eq!(blocks.len(), 2);
         assert!(matches!(blocks[0], ToolResultContentBlock::Text(_)));
         assert!(matches!(blocks[1], ToolResultContentBlock::Image(_)));
@@ -120,7 +126,9 @@ mod tests {
     fn tool_result_string_content_deserializes() {
         let json = serde_json::json!("plain text result");
         let contents: ToolResultContents = serde_json::from_value(json).unwrap();
-        let blocks = Vec::<ToolResultContentBlock>::try_from(&contents).unwrap();
+        let blocks = contents
+            .to_tool_result_content_blocks(&DocumentCounter::new())
+            .unwrap();
         assert_eq!(blocks.len(), 1);
         assert!(matches!(blocks[0], ToolResultContentBlock::Text(_)));
     }
@@ -131,7 +139,9 @@ mod tests {
             {"type": "tool_reference", "tool_name": "AskUserQuestion"}
         ]);
         let contents: ToolResultContents = serde_json::from_value(json).unwrap();
-        let blocks = Vec::<ToolResultContentBlock>::try_from(&contents).unwrap();
+        let blocks = contents
+            .to_tool_result_content_blocks(&DocumentCounter::new())
+            .unwrap();
         assert_eq!(blocks.len(), 1);
         assert!(matches!(blocks[0], ToolResultContentBlock::Json(_)));
     }
@@ -152,7 +162,9 @@ mod tests {
             }
         ]);
         let contents: ToolResultContents = serde_json::from_value(json).unwrap();
-        let blocks = Vec::<ToolResultContentBlock>::try_from(&contents).unwrap();
+        let blocks = contents
+            .to_tool_result_content_blocks(&DocumentCounter::new())
+            .unwrap();
         assert_eq!(blocks.len(), 1);
         assert!(matches!(blocks[0], ToolResultContentBlock::Document(_)));
     }
@@ -164,7 +176,9 @@ mod tests {
             {"type": "tool_reference", "tool_name": "AskUserQuestion"}
         ]);
         let contents: ToolResultContents = serde_json::from_value(json).unwrap();
-        let blocks = Vec::<ToolResultContentBlock>::try_from(&contents).unwrap();
+        let blocks = contents
+            .to_tool_result_content_blocks(&DocumentCounter::new())
+            .unwrap();
         assert_eq!(blocks.len(), 2);
         assert!(matches!(blocks[0], ToolResultContentBlock::Text(_)));
         assert!(matches!(blocks[1], ToolResultContentBlock::Json(_)));
