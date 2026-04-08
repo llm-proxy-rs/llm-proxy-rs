@@ -51,10 +51,12 @@ impl Message {
     }
 }
 
-impl Messages {
-    pub fn to_bedrock_messages(&self) -> anyhow::Result<Option<Vec<BedrockMessage>>> {
+impl TryFrom<&Messages> for Option<Vec<BedrockMessage>> {
+    type Error = anyhow::Error;
+
+    fn try_from(messages: &Messages) -> Result<Self, Self::Error> {
         let counter = DocumentCounter::new();
-        let bedrock_messages: Vec<BedrockMessage> = match self {
+        let bedrock_messages: Vec<BedrockMessage> = match messages {
             Messages::String(s) => {
                 let content = vec![ContentBlock::Text(s.clone())];
                 vec![
@@ -152,7 +154,9 @@ mod tests {
     fn messages_string_to_bedrock() {
         let json = serde_json::json!("just a string");
         let messages: Messages = serde_json::from_value(json).unwrap();
-        let bedrock = messages.to_bedrock_messages().unwrap().unwrap();
+        let bedrock = Option::<Vec<BedrockMessage>>::try_from(&messages)
+            .unwrap()
+            .unwrap();
         assert_eq!(bedrock.len(), 1);
         assert_eq!(bedrock[0].role(), &ConversationRole::User);
         match &bedrock[0].content()[0] {

@@ -285,7 +285,8 @@ impl V1MessagesProvider for BedrockV1MessagesProvider {
         request: &V1MessagesCountTokensRequest,
         inference_profile_prefixes: &[String],
     ) -> anyhow::Result<i32> {
-        let messages: Option<Vec<BedrockMessage>> = request.messages.to_bedrock_messages()?;
+        let messages: Option<Vec<BedrockMessage>> =
+            Option::<Vec<BedrockMessage>>::try_from(&request.messages)?;
 
         let system: Option<Vec<SystemContentBlock>> = request
             .system

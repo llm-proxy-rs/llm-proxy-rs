@@ -44,7 +44,7 @@ impl TryFrom<&V1MessagesRequest> for BedrockChatCompletion {
     type Error = anyhow::Error;
 
     fn try_from(request: &V1MessagesRequest) -> Result<Self, Self::Error> {
-        let messages = request.messages.to_bedrock_messages()?;
+        let messages = Option::<Vec<BedrockMessage>>::try_from(&request.messages)?;
 
         let system_content_blocks = request
             .system

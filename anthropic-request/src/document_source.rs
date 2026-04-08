@@ -1,11 +1,10 @@
-use std::cell::Cell;
-
 use anyhow::bail;
 use aws_sdk_bedrockruntime::types::{
     DocumentBlock, DocumentFormat, DocumentSource as BedrockDocumentSource,
 };
 use base64::{Engine as _, engine::general_purpose};
 use serde::{Deserialize, Serialize};
+use std::cell::Cell;
 
 pub struct DocumentCounter(Cell<usize>);
 

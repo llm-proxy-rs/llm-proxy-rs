@@ -28,7 +28,7 @@ pub enum ToolResultContent {
 }
 
 impl ToolResultContent {
-    fn to_content_block(
+    fn to_tool_result_content_block(
         &self,
         counter: &DocumentCounter,
     ) -> anyhow::Result<Option<ToolResultContentBlock>> {
@@ -69,7 +69,7 @@ impl ToolResultContents {
             ToolResultContents::String(s) => Ok(vec![ToolResultContentBlock::Text(s.clone())]),
             ToolResultContents::Array(a) => a
                 .iter()
-                .map(|c| c.to_content_block(counter))
+                .map(|c| c.to_tool_result_content_block(counter))
                 .collect::<Result<Vec<_>, _>>()
                 .map(|v| v.into_iter().flatten().collect()),
         }
