@@ -70,9 +70,7 @@ pub struct V1MessagesCountTokensRequest {
 
 #[cfg(test)]
 mod tests {
-    use aws_sdk_bedrockruntime::types::{
-        ContentBlock, Message as BedrockMessage, SystemContentBlock, Tool as BedrockTool,
-    };
+    use aws_sdk_bedrockruntime::types::{ContentBlock, SystemContentBlock, Tool as BedrockTool};
     use base64::{Engine as _, engine::general_purpose};
 
     use super::*;
@@ -190,13 +188,14 @@ mod tests {
         assert_eq!(messages.len(), 3);
 
         // message 0: user with image + text
-        let m0 = BedrockMessage::try_from(&messages[0]).unwrap();
+        let counter = DocumentCounter::new();
+        let m0 = messages[0].to_bedrock_message(&counter).unwrap();
         assert_eq!(m0.content().len(), 2);
         assert!(matches!(m0.content()[0], ContentBlock::Image(_)));
         assert!(matches!(m0.content()[1], ContentBlock::Text(_)));
 
         // message 1: assistant with tool_use
-        let m1 = BedrockMessage::try_from(&messages[1]).unwrap();
+        let m1 = messages[1].to_bedrock_message(&counter).unwrap();
         assert_eq!(m1.content().len(), 1);
         match &m1.content()[0] {
             ContentBlock::ToolUse(tu) => {
@@ -208,7 +207,7 @@ mod tests {
 
         // message 2: user with tool_result (mixed text+image) + cache control
         // tool_result is reordered before other content; cache point follows
-        let m2 = BedrockMessage::try_from(&messages[2]).unwrap();
+        let m2 = messages[2].to_bedrock_message(&counter).unwrap();
         assert_eq!(m2.content().len(), 2);
         match &m2.content()[0] {
             ContentBlock::ToolResult(tr) => {
