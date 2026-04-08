@@ -1,9 +1,20 @@
+use std::sync::atomic::{AtomicUsize, Ordering};
+
 use anyhow::bail;
 use aws_sdk_bedrockruntime::types::{
     DocumentBlock, DocumentFormat, DocumentSource as BedrockDocumentSource,
 };
 use base64::{Engine as _, engine::general_purpose};
 use serde::{Deserialize, Serialize};
+
+static DOCUMENT_COUNTER: AtomicUsize = AtomicUsize::new(0);
+
+fn next_document_name() -> String {
+    format!(
+        "document_{}",
+        DOCUMENT_COUNTER.fetch_add(1, Ordering::Relaxed)
+    )
+}
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(tag = "type")]
@@ -20,6 +31,8 @@ impl TryFrom<&DocumentSource> for DocumentBlock {
     type Error = anyhow::Error;
 
     fn try_from(source: &DocumentSource) -> Result<Self, Self::Error> {
+        let name = next_document_name();
+
         match source {
             DocumentSource::Base64 { media_type, data } => {
                 let format = match media_type.as_str() {
@@ -39,7 +52,7 @@ impl TryFrom<&DocumentSource> for DocumentBlock {
 
                 Ok(DocumentBlock::builder()
                     .format(format)
-                    .name("document")
+                    .name(name)
                     .source(BedrockDocumentSource::Bytes(bytes.into()))
                     .build()?)
             }
@@ -55,7 +68,7 @@ impl TryFrom<&DocumentSource> for DocumentBlock {
 
                 Ok(DocumentBlock::builder()
                     .format(format)
-                    .name("document")
+                    .name(name)
                     .source(BedrockDocumentSource::Text(data.clone()))
                     .build()?)
             }
@@ -94,5 +107,17 @@ mod tests {
         };
         let block = DocumentBlock::try_from(&source).unwrap();
         assert_eq!(*block.format(), DocumentFormat::Pdf);
+    }
+
+    #[test]
+    fn auto_generated_names_are_unique() {
+        let data = general_purpose::STANDARD.encode(b"%PDF-1.4");
+        let source = DocumentSource::Base64 {
+            media_type: "application/pdf".into(),
+            data,
+        };
+        let block1 = DocumentBlock::try_from(&source).unwrap();
+        let block2 = DocumentBlock::try_from(&source).unwrap();
+        assert_ne!(block1.name(), block2.name());
     }
 }

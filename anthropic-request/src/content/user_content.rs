@@ -188,6 +188,23 @@ mod tests {
     }
 
     #[test]
+    fn document_without_title_gets_auto_name() {
+        use base64::{Engine as _, engine::general_purpose};
+
+        let data = general_purpose::STANDARD.encode(b"%PDF-1.4");
+        let json = serde_json::json!([
+            {"type": "document", "source": {"type": "base64", "media_type": "application/pdf", "data": data}}
+        ]);
+        let contents: UserContents = serde_json::from_value(json).unwrap();
+        let blocks = Vec::<ContentBlock>::try_from(&contents).unwrap();
+        assert_eq!(blocks.len(), 2);
+        match &blocks[0] {
+            ContentBlock::Document(doc) => assert!(doc.name().starts_with("document_")),
+            other => panic!("expected Document, got {:?}", other),
+        }
+    }
+
+    #[test]
     fn tool_result_with_cache_control() {
         let json = serde_json::json!([
             {
