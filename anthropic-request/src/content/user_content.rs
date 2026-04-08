@@ -104,7 +104,7 @@ impl UserContent {
                 let tool_result_block = ToolResultBlock::builder()
                     .tool_use_id(tool_use_id)
                     .set_content(Some(match content {
-                        Some(c) => c.to_content_blocks(counter)?,
+                        Some(c) => c.to_tool_result_content_blocks(counter)?,
                         None => vec![],
                     }))
                     .set_status(is_error.map(|is_error| {

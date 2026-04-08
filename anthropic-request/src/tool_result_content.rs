@@ -61,7 +61,7 @@ impl ToolResultContent {
 }
 
 impl ToolResultContents {
-    pub fn to_content_blocks(
+    pub fn to_tool_result_content_blocks(
         &self,
         counter: &DocumentCounter,
     ) -> anyhow::Result<Vec<ToolResultContentBlock>> {
@@ -93,7 +93,9 @@ mod tests {
             }
         ]);
         let contents: ToolResultContents = serde_json::from_value(json).unwrap();
-        let blocks = contents.to_content_blocks(&DocumentCounter::new()).unwrap();
+        let blocks = contents
+            .to_tool_result_content_blocks(&DocumentCounter::new())
+            .unwrap();
         assert_eq!(blocks.len(), 1);
         assert!(matches!(blocks[0], ToolResultContentBlock::Image(_)));
     }
@@ -112,7 +114,9 @@ mod tests {
             }
         ]);
         let contents: ToolResultContents = serde_json::from_value(json).unwrap();
-        let blocks = contents.to_content_blocks(&DocumentCounter::new()).unwrap();
+        let blocks = contents
+            .to_tool_result_content_blocks(&DocumentCounter::new())
+            .unwrap();
         assert_eq!(blocks.len(), 2);
         assert!(matches!(blocks[0], ToolResultContentBlock::Text(_)));
         assert!(matches!(blocks[1], ToolResultContentBlock::Image(_)));
@@ -122,7 +126,9 @@ mod tests {
     fn tool_result_string_content_deserializes() {
         let json = serde_json::json!("plain text result");
         let contents: ToolResultContents = serde_json::from_value(json).unwrap();
-        let blocks = contents.to_content_blocks(&DocumentCounter::new()).unwrap();
+        let blocks = contents
+            .to_tool_result_content_blocks(&DocumentCounter::new())
+            .unwrap();
         assert_eq!(blocks.len(), 1);
         assert!(matches!(blocks[0], ToolResultContentBlock::Text(_)));
     }
@@ -133,7 +139,9 @@ mod tests {
             {"type": "tool_reference", "tool_name": "AskUserQuestion"}
         ]);
         let contents: ToolResultContents = serde_json::from_value(json).unwrap();
-        let blocks = contents.to_content_blocks(&DocumentCounter::new()).unwrap();
+        let blocks = contents
+            .to_tool_result_content_blocks(&DocumentCounter::new())
+            .unwrap();
         assert_eq!(blocks.len(), 1);
         assert!(matches!(blocks[0], ToolResultContentBlock::Json(_)));
     }
@@ -154,7 +162,9 @@ mod tests {
             }
         ]);
         let contents: ToolResultContents = serde_json::from_value(json).unwrap();
-        let blocks = contents.to_content_blocks(&DocumentCounter::new()).unwrap();
+        let blocks = contents
+            .to_tool_result_content_blocks(&DocumentCounter::new())
+            .unwrap();
         assert_eq!(blocks.len(), 1);
         assert!(matches!(blocks[0], ToolResultContentBlock::Document(_)));
     }
@@ -166,7 +176,9 @@ mod tests {
             {"type": "tool_reference", "tool_name": "AskUserQuestion"}
         ]);
         let contents: ToolResultContents = serde_json::from_value(json).unwrap();
-        let blocks = contents.to_content_blocks(&DocumentCounter::new()).unwrap();
+        let blocks = contents
+            .to_tool_result_content_blocks(&DocumentCounter::new())
+            .unwrap();
         assert_eq!(blocks.len(), 2);
         assert!(matches!(blocks[0], ToolResultContentBlock::Text(_)));
         assert!(matches!(blocks[1], ToolResultContentBlock::Json(_)));
