@@ -7,6 +7,30 @@ use aws_sdk_bedrockruntime::types::{
 
 use crate::bedrock::BedrockChatCompletion;
 
+/// Remove a specific content block from a message at the given indices.
+/// If the message becomes empty after removal, it is removed entirely.
+pub fn remove_content_block(
+    messages: &mut Vec<BedrockMessage>,
+    message_index: usize,
+    content_index: usize,
+) {
+    if let Some(msg) = messages.get(message_index) {
+        let mut content: Vec<ContentBlock> = msg.content().to_vec();
+        if content_index < content.len() {
+            content.remove(content_index);
+            if content.is_empty() {
+                messages.remove(message_index);
+            } else if let Ok(new_msg) = BedrockMessage::builder()
+                .role(msg.role().clone())
+                .set_content(Some(content))
+                .build()
+            {
+                messages[message_index] = new_msg;
+            }
+        }
+    }
+}
+
 /// Bedrock returns "The toolConfig field must be defined when using toolUse and toolResult
 /// content blocks." when no tool configuration is present. Remove them so prior tool-augmented
 /// conversation history can be forwarded without a tools field.
@@ -177,5 +201,59 @@ mod tests {
         let result = BedrockChatCompletion::try_from(&request).unwrap();
         let tool_config = result.tool_config.unwrap();
         assert!(!tool_config.tools().is_empty());
+    }
+
+    #[test]
+    fn remove_content_block_removes_specific_block() {
+        let mut messages = vec![
+            BedrockMessage::builder()
+                .role(ConversationRole::User)
+                .content(ContentBlock::Text("hello".into()))
+                .build()
+                .unwrap(),
+            BedrockMessage::builder()
+                .role(ConversationRole::Assistant)
+                .content(ContentBlock::Text("thinking".into()))
+                .content(ContentBlock::Text("response".into()))
+                .build()
+                .unwrap(),
+        ];
+        remove_content_block(&mut messages, 1, 0);
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[1].content().len(), 1);
+        assert!(matches!(&messages[1].content()[0], ContentBlock::Text(t) if t == "response"));
+    }
+
+    #[test]
+    fn remove_content_block_removes_empty_message() {
+        let mut messages = vec![
+            BedrockMessage::builder()
+                .role(ConversationRole::User)
+                .content(ContentBlock::Text("hello".into()))
+                .build()
+                .unwrap(),
+            BedrockMessage::builder()
+                .role(ConversationRole::Assistant)
+                .content(ContentBlock::Text("only block".into()))
+                .build()
+                .unwrap(),
+        ];
+        remove_content_block(&mut messages, 1, 0);
+        assert_eq!(messages.len(), 1);
+    }
+
+    #[test]
+    fn remove_content_block_noop_on_out_of_bounds() {
+        let mut messages = vec![
+            BedrockMessage::builder()
+                .role(ConversationRole::User)
+                .content(ContentBlock::Text("hello".into()))
+                .build()
+                .unwrap(),
+        ];
+        remove_content_block(&mut messages, 5, 0);
+        assert_eq!(messages.len(), 1);
+        remove_content_block(&mut messages, 0, 5);
+        assert_eq!(messages.len(), 1);
     }
 }

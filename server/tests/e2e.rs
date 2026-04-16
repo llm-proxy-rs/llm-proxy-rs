@@ -1113,3 +1113,75 @@ startxref
     assert_eq!(event_types.first(), Some(&"message_start"));
     assert_eq!(event_types.last(), Some(&"message_stop"));
 }
+
+/// Sends a request with a thinking block whose signature doesn't match the
+/// original response. Bedrock rejects with "`thinking` or `redacted_thinking`
+/// blocks in the latest assistant message cannot be modified". Our retry logic
+/// strips the problematic block and succeeds on the second attempt.
+#[tokio::test]
+#[ignore]
+async fn v1_messages_retries_on_modified_thinking_block() {
+    let app = build_app().await;
+
+    let body = serde_json::json!({
+        "model": MODEL,
+        "max_tokens": 2048,
+        "stream": true,
+        "thinking": {
+            "type": "enabled",
+            "budget_tokens": 1024
+        },
+        "messages": [
+            {
+                "role": "user",
+                "content": "What is 2+2?"
+            },
+            {
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": "thinking",
+                        "thinking": "This thinking text has been modified and no longer matches the signature.",
+                        "signature": "EocGCkgIDBABGAIqQBO8iEKuah4a7rRPOAhllNhm96+YQVxxs1I7y/Crd7WtrNiJWwcra0S1Jxv0fr/tjjnVvJ9lLpepkVK5lx2uIS0SDBebCMvCVb4L/PIRohoMr3VStg1vv2TQnCREIjCG05RXwdU3n0K60KATK+mXtg+xlSNWb5Uec8W+sbsX0z4Q4nXL/5+JpS8lSdw24vQq7AQZrj47G3YkI6f3UITVFy1ijRCJCRseJz4rAJhkuLqW/udR/CInmtt7LFLM2ztUkhM9AUvubd6MtepqgQUArmPFWvAZMBOvP6L0XQR/ChX4pLa8G9pwSDqX3pROhD33929WaGjlohFMwsC7EDwqfW+r5uTxzweOZZWFssgAqLtRL4eKsQG1/WkZPvvZOelBrUz9LMpGX2akuRDYrCr2C00E/zBNw2FaZ+Q+v96Mk0WgVwyNjulE4kuRWI0acc9v0L7c/+1S6KKfdwz+UhbsoNiLWaZj//2ic9UaeKNLM9eGm5bCumIe0+M5BD34Fu/ZglgI6UijVB7QRESxa7/hxDB7f3PrSeKro+rPMvcQpTEGpL3M5IVyQUL/xzaMoSV6RPspEtV/8sUFHA68piSyjrpk97Rxr52bHeQaBNV2Jc5CRF0nleFZz1jhQgg4bYuQK7hrKCJ6Aw//Ed2mrajGDpQY7cSkzNy5mxWs+wd8WOlc+ViaOMEBAAgGT+F+Nj++0coWaXJ5u9kpWH/yHvDaE+dY3e7eFcT6y4xGInmZZEexgFXa1S+NbWfTjuxM3YCITPxOQsdB+ei61yW1ktk6vMvhXWTfeMDpLDVfew6/89jvaz8E6vj72zEyJFTkV/cp8wJUGDazxsAojQgL8Q3VDeRuyQykJLQ5HZlqXU13iT59nNmtY9Xy+6BTkf9YBKUua6sVdyWKagKVpBoB5XWaD4GHjW+nhGcaP3/Sfhr3bfTcu0p/3G2owSbEIymD0JiO+y+//bsXiq+3pZzRPTc5P6IUsPZas2iuhp07tibYT4nFZoffchmiGNR2EWHwUhgB"
+                    },
+                    {
+                        "type": "text",
+                        "text": "The answer is 4."
+                    }
+                ]
+            },
+            {
+                "role": "user",
+                "content": "Are you sure?"
+            }
+        ]
+    });
+
+    let request = axum::http::Request::builder()
+        .method("POST")
+        .uri("/v1/messages")
+        .header("content-type", "application/json")
+        .body(Body::from(serde_json::to_vec(&body).unwrap()))
+        .unwrap();
+
+    let response = app.oneshot(request).await.unwrap();
+
+    let status = response.status();
+    let body_bytes = response.into_body().collect().await.unwrap().to_bytes();
+    let body_str = String::from_utf8(body_bytes.to_vec()).unwrap();
+    assert_eq!(status, 200, "expected retry to succeed, got: {body_str}");
+
+    let events = parse_sse_events(&body_str);
+    let event_types: Vec<&str> = events.iter().map(|(e, _)| e.as_str()).collect();
+
+    assert!(
+        event_types.contains(&"message_start"),
+        "missing message_start, got: {event_types:?}"
+    );
+    assert!(
+        event_types.contains(&"message_stop"),
+        "missing message_stop, got: {event_types:?}"
+    );
+    assert_eq!(event_types.first(), Some(&"message_start"));
+    assert_eq!(event_types.last(), Some(&"message_stop"));
+}

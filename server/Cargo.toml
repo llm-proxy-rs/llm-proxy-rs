@@ -9,13 +9,13 @@ anthropic-request = { path = "../anthropic-request" }
 anthropic-response = { path = "../anthropic-response" }
 aws-config = "1.8.15"
 aws-sdk-bedrockruntime = "1.129.0"
-axum = "0.8.8"
+axum = "0.8.9"
 chat = { path = "../chat" }
 common = { path = "../common" }
 config = "0.15.22"
 request = { path = "../request" }
 response = { path = "../response" }
-tokio = { version = "1.51.1", features = ["full"] }
+tokio = { version = "1.52.0", features = ["full"] }
 tracing = "0.1.44"
 tracing-subscriber = "0.3.23"
 
