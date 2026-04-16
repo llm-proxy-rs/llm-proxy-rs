@@ -20,6 +20,7 @@ use aws_sdk_bedrockruntime::{
 use aws_smithy_types::Document;
 use axum::response::sse::Event;
 use futures::stream::{BoxStream, StreamExt};
+use regex::Regex;
 use std::{sync::Arc, time::Duration};
 use tokio::{
     sync::mpsc,
@@ -28,6 +29,8 @@ use tokio::{
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::{error, info};
 use uuid::Uuid;
+
+use crate::bedrock::anthropic::remove_content_block;
 
 const PING_INTERVAL: Duration = Duration::from_secs(20);
 const EVENT_TX_SEND_TIMEOUT: Duration = Duration::from_secs(30);
@@ -222,13 +225,10 @@ fn parse_thinking_block_error(err: &SdkError<ConverseStreamError>) -> Option<(us
     }
 
     // Parse "messages.{N}.content.{M}" from the error message
-    let rest = message.split("messages.").nth(1)?;
-    let msg_idx_str = rest.split('.').next()?;
-    let msg_idx: usize = msg_idx_str.parse().ok()?;
-
-    let rest = rest.strip_prefix(msg_idx_str)?.strip_prefix(".content.")?;
-    let content_idx_str = rest.split(|c: char| !c.is_ascii_digit()).next()?;
-    let content_idx: usize = content_idx_str.parse().ok()?;
+    let re = Regex::new(r"messages\.(\d+)\.content\.(\d+)").ok()?;
+    let caps = re.captures(message)?;
+    let msg_idx: usize = caps[1].parse().ok()?;
+    let content_idx: usize = caps[2].parse().ok()?;
 
     Some((msg_idx, content_idx))
 }
@@ -305,12 +305,10 @@ impl V1MessagesProvider for BedrockV1MessagesProvider {
                         msg_idx, content_idx
                     );
 
-                    let mut retry_messages = bedrock_chat_completion.messages.unwrap_or_default();
-                    crate::bedrock::anthropic::remove_content_block(
-                        &mut retry_messages,
-                        msg_idx,
-                        content_idx,
-                    );
+                    let mut retry_messages = bedrock_chat_completion.messages.ok_or_else(|| {
+                        anyhow!("messages is None when retrying thinking block removal")
+                    })?;
+                    remove_content_block(&mut retry_messages, msg_idx, content_idx);
 
                     let retry_result = self
                         .bedrockruntime_client

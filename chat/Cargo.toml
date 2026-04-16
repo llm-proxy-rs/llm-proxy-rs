@@ -23,6 +23,7 @@ tokio-stream = "0.1.18"
 tracing = "0.1.44"
 reqwest = "0.13.2"
 reqwest-streams = { version = "0.16.0", features = ["json"] }
+regex = "1.12.3"
 
 [dev-dependencies]
 aws-smithy-runtime-api = "1.11.6"
