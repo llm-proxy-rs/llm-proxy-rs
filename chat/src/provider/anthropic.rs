@@ -217,20 +217,26 @@ pub struct BedrockV1MessagesProvider {
 ///
 /// Expected error format:
 /// "messages.3.content.1: `thinking` or `redacted_thinking` blocks ... cannot be modified."
-fn parse_thinking_block_error(err: &SdkError<ConverseStreamError>) -> Option<(usize, usize)> {
-    let message = err.as_service_error()?.meta().message()?;
+fn parse_thinking_block_error(
+    err: &SdkError<ConverseStreamError>,
+) -> anyhow::Result<Option<(usize, usize)>> {
+    let Some(message) = err.as_service_error().and_then(|e| e.meta().message()) else {
+        return Ok(None);
+    };
 
     if !message.contains("`thinking` or `redacted_thinking` blocks in the latest assistant message cannot be modified") {
-        return None;
+        return Ok(None);
     }
 
     // Parse "messages.{N}.content.{M}" from the error message
-    let re = Regex::new(r"messages\.(\d+)\.content\.(\d+)").ok()?;
-    let caps = re.captures(message)?;
-    let msg_idx: usize = caps[1].parse().ok()?;
-    let content_idx: usize = caps[2].parse().ok()?;
+    let re = Regex::new(r"messages\.(\d+)\.content\.(\d+)")?;
+    let caps = re
+        .captures(message)
+        .ok_or_else(|| anyhow!("failed to parse message/content indices from: {message}"))?;
+    let msg_idx: usize = caps[1].parse()?;
+    let content_idx: usize = caps[2].parse()?;
 
-    Some((msg_idx, content_idx))
+    Ok(Some((msg_idx, content_idx)))
 }
 
 impl BedrockV1MessagesProvider {
@@ -299,7 +305,7 @@ impl V1MessagesProvider for BedrockV1MessagesProvider {
                 Ok(process_bedrock_stream(stream, model, usage_callback))
             }
             Err(e) => {
-                if let Some((msg_idx, content_idx)) = parse_thinking_block_error(&e) {
+                if let Some((msg_idx, content_idx)) = parse_thinking_block_error(&e)? {
                     info!(
                         "Thinking block error at messages.{}.content.{}, retrying with block removed",
                         msg_idx, content_idx
@@ -430,19 +436,19 @@ mod tests {
              `thinking` or `redacted_thinking` blocks in the latest assistant \
              message cannot be modified.",
         );
-        assert_eq!(parse_thinking_block_error(&err), Some((3, 1)));
+        assert_eq!(parse_thinking_block_error(&err).unwrap(), Some((3, 1)));
     }
 
     #[test]
     fn parse_thinking_block_error_returns_none_for_unrelated() {
         let err = make_sdk_error("Some other validation error");
-        assert_eq!(parse_thinking_block_error(&err), None);
+        assert_eq!(parse_thinking_block_error(&err).unwrap(), None);
     }
 
     #[test]
     fn parse_thinking_block_error_returns_none_for_missing_indices() {
         let err = make_sdk_error("thinking blocks cannot be modified but no message index here");
-        assert_eq!(parse_thinking_block_error(&err), None);
+        assert_eq!(parse_thinking_block_error(&err).unwrap(), None);
     }
 
     #[test]
@@ -452,6 +458,6 @@ mod tests {
              `thinking` or `redacted_thinking` blocks in the latest assistant \
              message cannot be modified.",
         );
-        assert_eq!(parse_thinking_block_error(&err), Some((0, 0)));
+        assert_eq!(parse_thinking_block_error(&err).unwrap(), Some((0, 0)));
     }
 }
