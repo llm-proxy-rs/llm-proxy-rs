@@ -8,6 +8,8 @@ use anyhow::anyhow;
 use async_trait::async_trait;
 use aws_sdk_bedrockruntime::{
     Client,
+    error::SdkError,
+    operation::converse_stream::ConverseStreamError,
     primitives::event_stream::EventReceiver,
     types::{
         ContentBlock, ConverseStreamOutput, ConverseTokensRequest, CountTokensInput,
@@ -18,6 +20,7 @@ use aws_sdk_bedrockruntime::{
 use aws_smithy_types::Document;
 use axum::response::sse::Event;
 use futures::stream::{BoxStream, StreamExt};
+use regex::Regex;
 use std::{sync::Arc, time::Duration};
 use tokio::{
     sync::mpsc,
@@ -26,6 +29,8 @@ use tokio::{
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::{error, info};
 use uuid::Uuid;
+
+use crate::bedrock::anthropic::remove_content_block;
 
 const PING_INTERVAL: Duration = Duration::from_secs(20);
 const EVENT_TX_SEND_TIMEOUT: Duration = Duration::from_secs(30);
@@ -207,6 +212,33 @@ pub struct BedrockV1MessagesProvider {
     bedrockruntime_client: Client,
 }
 
+/// Parse a thinking block modification error to extract the message and content block indices.
+/// Returns `Some((message_index, content_index))` if the error matches.
+///
+/// Expected error format:
+/// "messages.3.content.1: `thinking` or `redacted_thinking` blocks ... cannot be modified."
+fn parse_thinking_block_error(
+    err: &SdkError<ConverseStreamError>,
+) -> anyhow::Result<Option<(usize, usize)>> {
+    let Some(message) = err.as_service_error().and_then(|e| e.meta().message()) else {
+        return Ok(None);
+    };
+
+    if !message.contains("`thinking` or `redacted_thinking` blocks in the latest assistant message cannot be modified") {
+        return Ok(None);
+    }
+
+    // Parse "messages.{N}.content.{M}" from the error message
+    let re = Regex::new(r"messages\.(\d+)\.content\.(\d+)")?;
+    let caps = re
+        .captures(message)
+        .ok_or_else(|| anyhow!("failed to parse message/content indices from: {message}"))?;
+    let msg_idx: usize = caps[1].parse()?;
+    let content_idx: usize = caps[2].parse()?;
+
+    Ok(Some((msg_idx, content_idx)))
+}
+
 impl BedrockV1MessagesProvider {
     pub fn new(bedrockruntime_client: Client) -> Self {
         Self {
@@ -251,19 +283,18 @@ impl V1MessagesProvider for BedrockV1MessagesProvider {
             bedrock_chat_completion.model_id
         );
 
-        let converse_builder = self
+        let result = self
             .bedrockruntime_client
             .converse_stream()
             .model_id(&bedrock_chat_completion.model_id)
-            .set_system(bedrock_chat_completion.system_content_blocks)
-            .set_messages(bedrock_chat_completion.messages)
-            .set_tool_config(bedrock_chat_completion.tool_config)
-            .set_inference_config(Some(bedrock_chat_completion.inference_config))
-            .set_additional_model_request_fields(additional_model_request_fields)
-            .set_output_config(bedrock_chat_completion.output_config);
-
-        info!("About to send Anthropic request to Bedrock...");
-        let result = converse_builder.send().await;
+            .set_system(bedrock_chat_completion.system_content_blocks.clone())
+            .set_messages(bedrock_chat_completion.messages.clone())
+            .set_tool_config(bedrock_chat_completion.tool_config.clone())
+            .set_inference_config(Some(bedrock_chat_completion.inference_config.clone()))
+            .set_additional_model_request_fields(additional_model_request_fields.clone())
+            .set_output_config(bedrock_chat_completion.output_config.clone())
+            .send()
+            .await;
 
         match result {
             Ok(response) => {
@@ -274,8 +305,46 @@ impl V1MessagesProvider for BedrockV1MessagesProvider {
                 Ok(process_bedrock_stream(stream, model, usage_callback))
             }
             Err(e) => {
-                error!("Bedrock API error: {:?}", e);
-                Err(e.into())
+                if let Some((msg_idx, content_idx)) = parse_thinking_block_error(&e)? {
+                    info!(
+                        "Thinking block error at messages.{}.content.{}, retrying with block removed",
+                        msg_idx, content_idx
+                    );
+
+                    let mut retry_messages = bedrock_chat_completion.messages.ok_or_else(|| {
+                        anyhow!("messages is None when retrying thinking block removal")
+                    })?;
+                    remove_content_block(&mut retry_messages, msg_idx, content_idx);
+
+                    let retry_result = self
+                        .bedrockruntime_client
+                        .converse_stream()
+                        .model_id(&bedrock_chat_completion.model_id)
+                        .set_system(bedrock_chat_completion.system_content_blocks)
+                        .set_messages(Some(retry_messages))
+                        .set_tool_config(bedrock_chat_completion.tool_config)
+                        .set_inference_config(Some(bedrock_chat_completion.inference_config))
+                        .set_additional_model_request_fields(additional_model_request_fields)
+                        .set_output_config(bedrock_chat_completion.output_config)
+                        .send()
+                        .await;
+
+                    match retry_result {
+                        Ok(response) => {
+                            info!("Retry succeeded after removing thinking block");
+                            let stream = response.stream;
+                            let usage_callback = Arc::new(usage_callback);
+                            Ok(process_bedrock_stream(stream, model, usage_callback))
+                        }
+                        Err(e) => {
+                            error!("Bedrock API error on retry: {:?}", e);
+                            Err(e.into())
+                        }
+                    }
+                } else {
+                    error!("Bedrock API error: {:?}", e);
+                    Err(e.into())
+                }
             }
         }
     }
@@ -333,5 +402,62 @@ impl V1MessagesProvider for BedrockV1MessagesProvider {
                 Err(e.into())
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aws_sdk_bedrockruntime::types::error::ValidationException;
+    use aws_smithy_runtime_api::http::{
+        Response as SmithyResponse, StatusCode as SmithyStatusCode,
+    };
+    use aws_smithy_types::body::SdkBody;
+    use aws_smithy_types::error::ErrorMetadata;
+
+    fn make_sdk_error(message: &str) -> SdkError<ConverseStreamError> {
+        let raw = SmithyResponse::new(
+            SmithyStatusCode::try_from(400).unwrap(),
+            SdkBody::from("error"),
+        );
+        let err = ConverseStreamError::ValidationException(
+            ValidationException::builder()
+                .message(message)
+                .meta(ErrorMetadata::builder().message(message).build())
+                .build(),
+        );
+        SdkError::service_error(err, raw)
+    }
+
+    #[test]
+    fn parse_thinking_block_error_extracts_indices() {
+        let err = make_sdk_error(
+            "The model returned the following errors: messages.3.content.1: \
+             `thinking` or `redacted_thinking` blocks in the latest assistant \
+             message cannot be modified.",
+        );
+        assert_eq!(parse_thinking_block_error(&err).unwrap(), Some((3, 1)));
+    }
+
+    #[test]
+    fn parse_thinking_block_error_returns_none_for_unrelated() {
+        let err = make_sdk_error("Some other validation error");
+        assert_eq!(parse_thinking_block_error(&err).unwrap(), None);
+    }
+
+    #[test]
+    fn parse_thinking_block_error_returns_none_for_missing_indices() {
+        let err = make_sdk_error("thinking blocks cannot be modified but no message index here");
+        assert_eq!(parse_thinking_block_error(&err).unwrap(), None);
+    }
+
+    #[test]
+    fn parse_thinking_block_error_zero_indices() {
+        let err = make_sdk_error(
+            "The model returned the following errors: messages.0.content.0: \
+             `thinking` or `redacted_thinking` blocks in the latest assistant \
+             message cannot be modified.",
+        );
+        assert_eq!(parse_thinking_block_error(&err).unwrap(), Some((0, 0)));
     }
 }

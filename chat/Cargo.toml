@@ -10,16 +10,21 @@ anthropic-response = { path = "../anthropic-response" }
 async-trait = "0.1.89"
 aws-sdk-bedrockruntime = "1.129.0"
 aws-smithy-types = "1.4.7"
-axum = "0.8.8"
+axum = "0.8.9"
 chrono = "0.4.44"
 futures = "0.3.32"
 request = { path = "../request" }
-uuid = { version = "1.23.0", features = ["v4"] }
+uuid = { version = "1.23.1", features = ["v4"] }
 response = { path = "../response" }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
-tokio = "1.51.1"
+tokio = "1.52.0"
 tokio-stream = "0.1.18"
 tracing = "0.1.44"
 reqwest = "0.13.2"
 reqwest-streams = { version = "0.16.0", features = ["json"] }
+regex = "1.12.3"
+
+[dev-dependencies]
+aws-smithy-runtime-api = "1.11.6"
+aws-smithy-types = "1.4.7"
