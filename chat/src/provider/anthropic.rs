@@ -285,9 +285,15 @@ impl V1MessagesProvider for BedrockV1MessagesProvider {
 
         let (event_tx, event_rx) = mpsc::channel::<anyhow::Result<Event>>(8);
 
+        let ping = Ok(Event::default().event("ping").data(r#"{"type": "ping"}"#));
+        event_tx.send(ping).await.ok();
+
         let ping_tx = event_tx.clone();
         let ping_task = tokio::spawn(async move {
-            let mut interval = tokio::time::interval(PING_INTERVAL);
+            let mut interval = tokio::time::interval_at(
+                tokio::time::Instant::now() + PING_INTERVAL,
+                PING_INTERVAL,
+            );
             loop {
                 interval.tick().await;
                 let ping = Ok(Event::default().event("ping").data(r#"{"type": "ping"}"#));
