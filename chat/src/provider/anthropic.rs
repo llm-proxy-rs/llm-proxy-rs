@@ -286,7 +286,10 @@ impl V1MessagesProvider for BedrockV1MessagesProvider {
         let (event_tx, event_rx) = mpsc::channel::<anyhow::Result<Event>>(8);
 
         let ping = Ok(Event::default().event("ping").data(r#"{"type": "ping"}"#));
-        event_tx.send(ping).await.ok();
+        event_tx
+            .send(ping)
+            .await
+            .map_err(|_| anyhow!("Failed to send initial ping event"))?;
 
         let ping_tx = event_tx.clone();
         let ping_task = tokio::spawn(async move {
@@ -298,7 +301,8 @@ impl V1MessagesProvider for BedrockV1MessagesProvider {
                 interval.tick().await;
                 let ping = Ok(Event::default().event("ping").data(r#"{"type": "ping"}"#));
                 if ping_tx.send(ping).await.is_err() {
-                    break;
+                    info!("SSE client disconnected, stopping ping task");
+                    return;
                 }
             }
         });
