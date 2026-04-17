@@ -286,6 +286,7 @@ impl V1MessagesProvider for BedrockV1MessagesProvider {
         let (event_tx, event_rx) = mpsc::channel::<anyhow::Result<Event>>(8);
 
         let ping = Ok(Event::default().event("ping").data(r#"{"type": "ping"}"#));
+        info!("Sending ping event");
         event_tx
             .send(ping)
             .await
@@ -300,6 +301,7 @@ impl V1MessagesProvider for BedrockV1MessagesProvider {
             loop {
                 interval.tick().await;
                 let ping = Ok(Event::default().event("ping").data(r#"{"type": "ping"}"#));
+                info!("Sending ping event");
                 if ping_tx.send(ping).await.is_err() {
                     info!("SSE client disconnected, stopping ping task");
                     return;
