@@ -40,10 +40,12 @@ fn process_bedrock_stream(
     model: String,
     usage_callback: Arc<dyn Fn(&TokenUsage) + Send + Sync>,
     event_tx: mpsc::Sender<anyhow::Result<Event>>,
+    ping_task: tokio::task::JoinHandle<()>,
 ) {
     let id = format!("msg_{}", Uuid::new_v4());
 
     tokio::spawn(async move {
+        ping_task.abort();
         let mut event_converter = EventConverter::new(id, model, usage_callback);
         let mut ping_interval = interval_at(Instant::now() + PING_INTERVAL, PING_INTERVAL);
         loop {
@@ -281,9 +283,19 @@ impl V1MessagesProvider for BedrockV1MessagesProvider {
             bedrock_chat_completion.model_id
         );
 
-        let (event_tx, event_rx) = mpsc::channel::<anyhow::Result<Event>>(1);
-        let ping = Ok(Event::default().event("ping").data(r#"{"type": "ping"}"#));
-        event_tx.send(ping).await.ok();
+        let (event_tx, event_rx) = mpsc::channel::<anyhow::Result<Event>>(8);
+
+        let ping_tx = event_tx.clone();
+        let ping_task = tokio::spawn(async move {
+            let mut interval = tokio::time::interval(PING_INTERVAL);
+            loop {
+                interval.tick().await;
+                let ping = Ok(Event::default().event("ping").data(r#"{"type": "ping"}"#));
+                if ping_tx.send(ping).await.is_err() {
+                    break;
+                }
+            }
+        });
 
         let result = self
             .bedrockruntime_client
@@ -304,7 +316,7 @@ impl V1MessagesProvider for BedrockV1MessagesProvider {
                 let stream = response.stream;
                 let usage_callback = Arc::new(usage_callback);
 
-                process_bedrock_stream(stream, model, usage_callback, event_tx);
+                process_bedrock_stream(stream, model, usage_callback, event_tx, ping_task);
                 Ok(ReceiverStream::new(event_rx).boxed())
             }
             Err(e) => {
@@ -337,7 +349,13 @@ impl V1MessagesProvider for BedrockV1MessagesProvider {
                             info!("Retry succeeded after removing thinking block");
                             let stream = response.stream;
                             let usage_callback = Arc::new(usage_callback);
-                            process_bedrock_stream(stream, model, usage_callback, event_tx);
+                            process_bedrock_stream(
+                                stream,
+                                model,
+                                usage_callback,
+                                event_tx,
+                                ping_task,
+                            );
                             Ok(ReceiverStream::new(event_rx).boxed())
                         }
                         Err(e) => {
