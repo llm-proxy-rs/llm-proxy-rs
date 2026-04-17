@@ -39,9 +39,9 @@ fn process_bedrock_stream(
     mut stream: EventReceiver<ConverseStreamOutput, ConverseStreamOutputError>,
     model: String,
     usage_callback: Arc<dyn Fn(&TokenUsage) + Send + Sync>,
-) -> BoxStream<'static, anyhow::Result<Event>> {
+    event_tx: mpsc::Sender<anyhow::Result<Event>>,
+) {
     let id = format!("msg_{}", Uuid::new_v4());
-    let (event_tx, event_rx) = mpsc::channel::<anyhow::Result<Event>>(1);
 
     tokio::spawn(async move {
         let mut event_converter = EventConverter::new(id, model, usage_callback);
@@ -100,8 +100,6 @@ fn process_bedrock_stream(
         }
         info!("Bedrock stream finished");
     });
-
-    ReceiverStream::new(event_rx).boxed()
 }
 
 #[async_trait]
@@ -283,6 +281,10 @@ impl V1MessagesProvider for BedrockV1MessagesProvider {
             bedrock_chat_completion.model_id
         );
 
+        let (event_tx, event_rx) = mpsc::channel::<anyhow::Result<Event>>(1);
+        let ping = Ok(Event::default().event("ping").data(r#"{"type": "ping"}"#));
+        event_tx.send(ping).await.ok();
+
         let result = self
             .bedrockruntime_client
             .converse_stream()
@@ -302,7 +304,8 @@ impl V1MessagesProvider for BedrockV1MessagesProvider {
                 let stream = response.stream;
                 let usage_callback = Arc::new(usage_callback);
 
-                Ok(process_bedrock_stream(stream, model, usage_callback))
+                process_bedrock_stream(stream, model, usage_callback, event_tx);
+                Ok(ReceiverStream::new(event_rx).boxed())
             }
             Err(e) => {
                 if let Some((msg_idx, content_idx)) = parse_thinking_block_error(&e)? {
@@ -334,7 +337,8 @@ impl V1MessagesProvider for BedrockV1MessagesProvider {
                             info!("Retry succeeded after removing thinking block");
                             let stream = response.stream;
                             let usage_callback = Arc::new(usage_callback);
-                            Ok(process_bedrock_stream(stream, model, usage_callback))
+                            process_bedrock_stream(stream, model, usage_callback, event_tx);
+                            Ok(ReceiverStream::new(event_rx).boxed())
                         }
                         Err(e) => {
                             error!("Bedrock API error on retry: {:?}", e);
