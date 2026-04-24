@@ -4,6 +4,7 @@ pub mod additional_model_request_fields;
 pub mod anthropic_beta;
 pub mod cache_control;
 pub mod content;
+pub mod context_management;
 pub mod document_source;
 pub mod image_source;
 pub mod message;
@@ -16,6 +17,7 @@ pub mod tool_result_content;
 pub use additional_model_request_fields::*;
 pub use cache_control::*;
 pub use content::*;
+pub use context_management::*;
 pub use document_source::*;
 pub use image_source::*;
 pub use message::*;
@@ -52,6 +54,8 @@ pub struct V1MessagesRequest {
     pub top_p: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub output_config: Option<OutputConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context_management: Option<ContextManagement>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
