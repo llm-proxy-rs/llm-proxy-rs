@@ -24,29 +24,14 @@ async fn build_app() -> axum::Router {
     get_app(state)
 }
 
-async fn collect_body(mut body: axum::body::Body) -> Vec<u8> {
+async fn collect_body(body: axum::body::Body) -> Vec<u8> {
     use http_body_util::BodyExt;
-    let mut buf = Vec::new();
-    while let Some(frame) = body.frame().await {
-        match frame {
-            Ok(f) => {
-                if let Some(data) = f.data_ref() {
-                    buf.extend_from_slice(data);
-                }
-            }
-            Err(e) => {
-                buf.extend_from_slice(
-                    format!(
-                        "\n<<BODY_STREAM_ERROR: {e} / source={:?}>>\n",
-                        std::error::Error::source(&e)
-                    )
-                    .as_bytes(),
-                );
-                break;
-            }
-        }
-    }
-    buf
+
+    body.collect()
+        .await
+        .expect("failed to collect response body")
+        .to_bytes()
+        .to_vec()
 }
 
 fn parse_sse_events(body: &str) -> Vec<(String, String)> {
