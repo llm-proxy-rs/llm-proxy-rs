@@ -37,7 +37,7 @@ pub fn get_additional_model_request_fields(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ContextManagement, ContextManagementEdit, OutputConfig, Thinking};
+    use crate::{ContextManagement, ContextManagementEdit, Keep, OutputConfig, Thinking};
 
     #[test]
     fn get_additional_model_request_fields_returns_none_when_all_inputs_empty() {
@@ -76,7 +76,7 @@ mod tests {
         let context_management = ContextManagement {
             edits: vec![ContextManagementEdit {
                 edit_type: "clear_thinking_20251015".to_string(),
-                keep: "all".to_string(),
+                keep: Keep::String("all".to_string()),
             }],
         };
 
