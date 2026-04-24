@@ -1,12 +1,12 @@
 use aws_config::BehaviorVersion;
 use aws_sdk_bedrockruntime::Client;
 use axum::body::Body;
-use http_body_util::BodyExt;
 use server::{AppState, get_app};
 use std::sync::Arc;
 use tower::ServiceExt;
 
-const MODEL: &str = "global.anthropic.claude-opus-4-6-v1";
+const OPUS_4_7: &str = "global.anthropic.claude-opus-4-7";
+const OPUS_4_6: &str = "global.anthropic.claude-opus-4-6-v1";
 
 async fn build_app() -> axum::Router {
     let config = aws_config::load_defaults(BehaviorVersion::latest()).await;
@@ -15,10 +15,38 @@ async fn build_app() -> axum::Router {
     let state = Arc::new(AppState {
         bedrockruntime_client: client,
         inference_profile_prefixes: vec!["us.".to_string(), "global.".to_string()],
-        anthropic_beta_whitelist: vec!["context-1m-2025-08-07".to_string()],
+        anthropic_beta_whitelist: vec![
+            "context-1m-2025-08-07".to_string(),
+            "context-management-2025-06-27".to_string(),
+        ],
     });
 
     get_app(state)
+}
+
+async fn collect_body(mut body: axum::body::Body) -> Vec<u8> {
+    use http_body_util::BodyExt;
+    let mut buf = Vec::new();
+    while let Some(frame) = body.frame().await {
+        match frame {
+            Ok(f) => {
+                if let Some(data) = f.data_ref() {
+                    buf.extend_from_slice(data);
+                }
+            }
+            Err(e) => {
+                buf.extend_from_slice(
+                    format!(
+                        "\n<<BODY_STREAM_ERROR: {e} / source={:?}>>\n",
+                        std::error::Error::source(&e)
+                    )
+                    .as_bytes(),
+                );
+                break;
+            }
+        }
+    }
+    buf
 }
 
 fn parse_sse_events(body: &str) -> Vec<(String, String)> {
@@ -51,7 +79,7 @@ async fn v1_messages_returns_complete_sse_stream() {
     let app = build_app().await;
 
     let body = serde_json::json!({
-        "model": MODEL,
+        "model": OPUS_4_7,
         "max_tokens": 64,
         "stream": true,
         "messages": [
@@ -69,7 +97,7 @@ async fn v1_messages_returns_complete_sse_stream() {
     let response = app.oneshot(request).await.unwrap();
     assert_eq!(response.status(), 200);
 
-    let body_bytes = response.into_body().collect().await.unwrap().to_bytes();
+    let body_bytes = collect_body(response.into_body()).await;
     let body_str = String::from_utf8(body_bytes.to_vec()).unwrap();
 
     let events = parse_sse_events(&body_str);
@@ -111,7 +139,7 @@ async fn chat_completions_returns_complete_sse_stream() {
     let app = build_app().await;
 
     let body = serde_json::json!({
-        "model": MODEL,
+        "model": OPUS_4_7,
         "max_tokens": 64,
         "stream": true,
         "messages": [
@@ -129,7 +157,7 @@ async fn chat_completions_returns_complete_sse_stream() {
     let response = app.oneshot(request).await.unwrap();
     assert_eq!(response.status(), 200);
 
-    let body_bytes = response.into_body().collect().await.unwrap().to_bytes();
+    let body_bytes = collect_body(response.into_body()).await;
     let body_str = String::from_utf8(body_bytes.to_vec()).unwrap();
 
     let events = parse_sse_events(&body_str);
@@ -168,7 +196,7 @@ async fn v1_messages_with_tools_missing_referenced_tool() {
 
     // tools defines "search" but messages reference "get_weather" which is not in tools
     let body = serde_json::json!({
-        "model": MODEL,
+        "model": OPUS_4_7,
         "max_tokens": 64,
         "stream": true,
         "tools": [
@@ -223,7 +251,7 @@ async fn v1_messages_with_tools_missing_referenced_tool() {
     let response = app.oneshot(request).await.unwrap();
 
     let status = response.status();
-    let body_bytes = response.into_body().collect().await.unwrap().to_bytes();
+    let body_bytes = collect_body(response.into_body()).await;
     let body_str = String::from_utf8(body_bytes.to_vec()).unwrap();
 
     println!("status: {status}, body: {body_str}");
@@ -235,7 +263,7 @@ async fn v1_messages_count_tokens_returns_token_count() {
     let app = build_app().await;
 
     let body = serde_json::json!({
-        "model": MODEL,
+        "model": OPUS_4_6,
         "messages": [
             {"role": "user", "content": "Hello, world!"}
         ]
@@ -249,9 +277,10 @@ async fn v1_messages_count_tokens_returns_token_count() {
         .unwrap();
 
     let response = app.oneshot(request).await.unwrap();
-    assert_eq!(response.status(), 200);
-
-    let body_bytes = response.into_body().collect().await.unwrap().to_bytes();
+    let status = response.status();
+    let body_bytes = collect_body(response.into_body()).await;
+    let body_str_dbg = String::from_utf8_lossy(&body_bytes).to_string();
+    assert_eq!(status, 200, "body: {body_str_dbg}");
     let json: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
 
     let input_tokens = json["input_tokens"].as_i64().unwrap();
@@ -267,7 +296,7 @@ async fn v1_messages_with_context_1m_beta() {
     let app = build_app().await;
 
     let body = serde_json::json!({
-        "model": MODEL,
+        "model": OPUS_4_7,
         "max_tokens": 64,
         "stream": true,
         "messages": [
@@ -286,7 +315,7 @@ async fn v1_messages_with_context_1m_beta() {
     let response = app.oneshot(request).await.unwrap();
     assert_eq!(response.status(), 200);
 
-    let body_bytes = response.into_body().collect().await.unwrap().to_bytes();
+    let body_bytes = collect_body(response.into_body()).await;
     let body_str = String::from_utf8(body_bytes.to_vec()).unwrap();
 
     let events = parse_sse_events(&body_str);
@@ -310,7 +339,7 @@ async fn v1_messages_with_tool_reference_content() {
     let app = build_app().await;
 
     let body = serde_json::json!({
-        "model": MODEL,
+        "model": OPUS_4_7,
         "max_tokens": 64,
         "stream": true,
         "tools": [
@@ -369,7 +398,7 @@ async fn v1_messages_with_tool_reference_content() {
     let response = app.oneshot(request).await.unwrap();
     assert_eq!(response.status(), 200);
 
-    let body_bytes = response.into_body().collect().await.unwrap().to_bytes();
+    let body_bytes = collect_body(response.into_body()).await;
     let body_str = String::from_utf8(body_bytes.to_vec()).unwrap();
 
     let events = parse_sse_events(&body_str);
@@ -393,7 +422,7 @@ async fn v1_messages_with_thinking_disabled() {
     let app = build_app().await;
 
     let body = serde_json::json!({
-        "model": MODEL,
+        "model": OPUS_4_7,
         "max_tokens": 64,
         "stream": true,
         "thinking": {"type": "disabled"},
@@ -412,7 +441,7 @@ async fn v1_messages_with_thinking_disabled() {
     let response = app.oneshot(request).await.unwrap();
     assert_eq!(response.status(), 200);
 
-    let body_bytes = response.into_body().collect().await.unwrap().to_bytes();
+    let body_bytes = collect_body(response.into_body()).await;
     let body_str = String::from_utf8(body_bytes.to_vec()).unwrap();
 
     let events = parse_sse_events(&body_str);
@@ -449,7 +478,7 @@ async fn v1_messages_with_tools_no_tool_choice_does_not_force_tool_use() {
     let app = build_app().await;
 
     let body = serde_json::json!({
-        "model": MODEL,
+        "model": OPUS_4_7,
         "max_tokens": 64,
         "stream": true,
         "tools": [
@@ -480,7 +509,7 @@ async fn v1_messages_with_tools_no_tool_choice_does_not_force_tool_use() {
     let response = app.oneshot(request).await.unwrap();
     assert_eq!(response.status(), 200);
 
-    let body_bytes = response.into_body().collect().await.unwrap().to_bytes();
+    let body_bytes = collect_body(response.into_body()).await;
     let body_str = String::from_utf8(body_bytes.to_vec()).unwrap();
 
     let events = parse_sse_events(&body_str);
@@ -516,7 +545,7 @@ async fn v1_messages_with_tool_choice_any_forces_tool_use() {
     let app = build_app().await;
 
     let body = serde_json::json!({
-        "model": MODEL,
+        "model": OPUS_4_7,
         "max_tokens": 256,
         "stream": true,
         "tools": [
@@ -548,7 +577,7 @@ async fn v1_messages_with_tool_choice_any_forces_tool_use() {
     let response = app.oneshot(request).await.unwrap();
     assert_eq!(response.status(), 200);
 
-    let body_bytes = response.into_body().collect().await.unwrap().to_bytes();
+    let body_bytes = collect_body(response.into_body()).await;
     let body_str = String::from_utf8(body_bytes.to_vec()).unwrap();
 
     let events = parse_sse_events(&body_str);
@@ -586,7 +615,7 @@ async fn v1_messages_tool_result_with_image_and_cache_control() {
     let tiny_png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
 
     let body = serde_json::json!({
-        "model": MODEL,
+        "model": OPUS_4_7,
         "max_tokens": 64,
         "stream": true,
         "system": [
@@ -662,7 +691,7 @@ async fn v1_messages_tool_result_with_image_and_cache_control() {
     let response = app.oneshot(request).await.unwrap();
     assert_eq!(response.status(), 200);
 
-    let body_bytes = response.into_body().collect().await.unwrap().to_bytes();
+    let body_bytes = collect_body(response.into_body()).await;
     let body_str = String::from_utf8(body_bytes.to_vec()).unwrap();
 
     let events = parse_sse_events(&body_str);
@@ -686,7 +715,7 @@ async fn v1_messages_count_tokens_with_tools() {
     let app = build_app().await;
 
     let body = serde_json::json!({
-        "model": MODEL,
+        "model": OPUS_4_6,
         "tools": [
             {
                 "name": "get_weather",
@@ -713,9 +742,10 @@ async fn v1_messages_count_tokens_with_tools() {
         .unwrap();
 
     let response = app.oneshot(request).await.unwrap();
-    assert_eq!(response.status(), 200);
-
-    let body_bytes = response.into_body().collect().await.unwrap().to_bytes();
+    let status = response.status();
+    let body_bytes = collect_body(response.into_body()).await;
+    let body_str_dbg = String::from_utf8_lossy(&body_bytes).to_string();
+    assert_eq!(status, 200, "body: {body_str_dbg}");
     let json: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
 
     let input_tokens = json["input_tokens"].as_i64().unwrap();
@@ -731,7 +761,7 @@ async fn v1_messages_count_tokens_with_tools_and_tool_choice() {
     let app = build_app().await;
 
     let body = serde_json::json!({
-        "model": MODEL,
+        "model": OPUS_4_6,
         "tools": [
             {
                 "name": "get_weather",
@@ -759,9 +789,10 @@ async fn v1_messages_count_tokens_with_tools_and_tool_choice() {
         .unwrap();
 
     let response = app.oneshot(request).await.unwrap();
-    assert_eq!(response.status(), 200);
-
-    let body_bytes = response.into_body().collect().await.unwrap().to_bytes();
+    let status = response.status();
+    let body_bytes = collect_body(response.into_body()).await;
+    let body_str_dbg = String::from_utf8_lossy(&body_bytes).to_string();
+    assert_eq!(status, 200, "body: {body_str_dbg}");
     let json: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
 
     let input_tokens = json["input_tokens"].as_i64().unwrap();
@@ -777,7 +808,7 @@ async fn v1_messages_with_tool_result_but_no_tools_field() {
     let app = build_app().await;
 
     let body = serde_json::json!({
-        "model": MODEL,
+        "model": OPUS_4_7,
         "max_tokens": 64,
         "stream": true,
         "messages": [
@@ -819,7 +850,7 @@ async fn v1_messages_with_tool_result_but_no_tools_field() {
     let response = app.oneshot(request).await.unwrap();
 
     let status = response.status();
-    let body_bytes = response.into_body().collect().await.unwrap().to_bytes();
+    let body_bytes = collect_body(response.into_body()).await;
     let body_str = String::from_utf8(body_bytes.to_vec()).unwrap();
     assert_eq!(status, 200, "response body: {body_str}");
 
@@ -844,7 +875,7 @@ async fn chat_completions_with_tool_messages_but_no_tools_field() {
     let app = build_app().await;
 
     let body = serde_json::json!({
-        "model": MODEL,
+        "model": OPUS_4_7,
         "max_tokens": 64,
         "stream": true,
         "messages": [
@@ -884,7 +915,7 @@ async fn chat_completions_with_tool_messages_but_no_tools_field() {
     let response = app.oneshot(request).await.unwrap();
 
     let status = response.status();
-    let body_bytes = response.into_body().collect().await.unwrap().to_bytes();
+    let body_bytes = collect_body(response.into_body()).await;
     let body_str = String::from_utf8(body_bytes.to_vec()).unwrap();
     assert_eq!(status, 200, "response body: {body_str}");
 
@@ -921,7 +952,7 @@ async fn v1_messages_with_tools_config_missing_referenced_tool_multiple_rounds()
 
     // tools config defines "search" only, but messages reference "bash" which is not in tools
     let body = serde_json::json!({
-        "model": MODEL,
+        "model": OPUS_4_7,
         "max_tokens": 64,
         "stream": true,
         "tools": [
@@ -997,7 +1028,7 @@ async fn v1_messages_with_tools_config_missing_referenced_tool_multiple_rounds()
     let response = app.oneshot(request).await.unwrap();
 
     let status = response.status();
-    let body_bytes = response.into_body().collect().await.unwrap().to_bytes();
+    let body_bytes = collect_body(response.into_body()).await;
     let body_str = String::from_utf8(body_bytes.to_vec()).unwrap();
 
     println!("status: {status}, body: {body_str}");
@@ -1058,7 +1089,7 @@ startxref
     let pdf_data_b = general_purpose::STANDARD.encode(pdf_b);
 
     let body = serde_json::json!({
-        "model": MODEL,
+        "model": OPUS_4_7,
         "max_tokens": 64,
         "stream": true,
         "messages": [{
@@ -1095,7 +1126,7 @@ startxref
     let response = app.oneshot(request).await.unwrap();
 
     let status = response.status();
-    let body_bytes = response.into_body().collect().await.unwrap().to_bytes();
+    let body_bytes = collect_body(response.into_body()).await;
     let body_str = String::from_utf8(body_bytes.to_vec()).unwrap();
     assert_eq!(status, 200, "response body: {body_str}");
 
@@ -1124,7 +1155,7 @@ async fn v1_messages_retries_on_modified_thinking_block() {
     let app = build_app().await;
 
     let body = serde_json::json!({
-        "model": MODEL,
+        "model": OPUS_4_6,
         "max_tokens": 2048,
         "stream": true,
         "thinking": {
@@ -1167,7 +1198,7 @@ async fn v1_messages_retries_on_modified_thinking_block() {
     let response = app.oneshot(request).await.unwrap();
 
     let status = response.status();
-    let body_bytes = response.into_body().collect().await.unwrap().to_bytes();
+    let body_bytes = collect_body(response.into_body()).await;
     let body_str = String::from_utf8(body_bytes.to_vec()).unwrap();
     assert_eq!(status, 200, "expected retry to succeed, got: {body_str}");
 
@@ -1184,4 +1215,100 @@ async fn v1_messages_retries_on_modified_thinking_block() {
     );
     assert_eq!(event_types.first(), Some(&"message_start"));
     assert_eq!(event_types.last(), Some(&"message_stop"));
+}
+
+#[tokio::test]
+#[ignore]
+async fn v1_messages_with_context_management_keep_all() {
+    let app = build_app().await;
+
+    let body = serde_json::json!({
+        "model": OPUS_4_6,
+        "max_tokens": 1024,
+        "stream": true,
+        "thinking": {"type": "adaptive"},
+        "context_management": {
+            "edits": [
+                {"type": "clear_thinking_20251015", "keep": "all"}
+            ]
+        },
+        "messages": [
+            {"role": "user", "content": "Say hi in exactly one word."}
+        ]
+    });
+
+    let request = axum::http::Request::builder()
+        .method("POST")
+        .uri("/v1/messages")
+        .header("content-type", "application/json")
+        .header("anthropic-beta", "context-management-2025-06-27")
+        .body(Body::from(serde_json::to_vec(&body).unwrap()))
+        .unwrap();
+
+    let response = app.oneshot(request).await.unwrap();
+    let status = response.status();
+    let body_bytes = collect_body(response.into_body()).await;
+    let body_str = String::from_utf8(body_bytes.to_vec()).unwrap();
+    assert_eq!(status, 200, "expected 200, got: {body_str}");
+
+    let events = parse_sse_events(&body_str);
+    let event_types: Vec<&str> = events.iter().map(|(e, _)| e.as_str()).collect();
+    assert_eq!(
+        event_types.first(),
+        Some(&"message_start"),
+        "body: {body_str}"
+    );
+    assert_eq!(
+        event_types.last(),
+        Some(&"message_stop"),
+        "body: {body_str}"
+    );
+}
+
+#[tokio::test]
+#[ignore]
+async fn v1_messages_with_context_management_keep_int() {
+    let app = build_app().await;
+
+    let body = serde_json::json!({
+        "model": OPUS_4_6,
+        "max_tokens": 1024,
+        "stream": true,
+        "thinking": {"type": "adaptive"},
+        "context_management": {
+            "edits": [
+                {"type": "clear_thinking_20251015", "keep": 2}
+            ]
+        },
+        "messages": [
+            {"role": "user", "content": "Say hi in exactly one word."}
+        ]
+    });
+
+    let request = axum::http::Request::builder()
+        .method("POST")
+        .uri("/v1/messages")
+        .header("content-type", "application/json")
+        .header("anthropic-beta", "context-management-2025-06-27")
+        .body(Body::from(serde_json::to_vec(&body).unwrap()))
+        .unwrap();
+
+    let response = app.oneshot(request).await.unwrap();
+    let status = response.status();
+    let body_bytes = collect_body(response.into_body()).await;
+    let body_str = String::from_utf8(body_bytes.to_vec()).unwrap();
+    assert_eq!(status, 200, "expected 200, got: {body_str}");
+
+    let events = parse_sse_events(&body_str);
+    let event_types: Vec<&str> = events.iter().map(|(e, _)| e.as_str()).collect();
+    assert_eq!(
+        event_types.first(),
+        Some(&"message_start"),
+        "body: {body_str}"
+    );
+    assert_eq!(
+        event_types.last(),
+        Some(&"message_stop"),
+        "body: {body_str}"
+    );
 }

@@ -1,7 +1,7 @@
 use anthropic_request::{
-    AssistantContent, AssistantContents, Message, Messages, UserContent, UserContents,
-    V1MessagesCountTokensRequest, V1MessagesRequest, build_tool_configuration,
-    get_additional_model_request_fields,
+    AssistantContent, AssistantContents, ContextManagement, ContextManagementEdit, Keep, Message,
+    Messages, UserContent, UserContents, V1MessagesCountTokensRequest, V1MessagesRequest,
+    build_tool_configuration, get_additional_model_request_fields,
 };
 use anthropic_response::EventConverter;
 use anyhow::anyhow;
@@ -20,7 +20,6 @@ use aws_sdk_bedrockruntime::{
 use aws_smithy_types::Document;
 use axum::response::sse::Event;
 use futures::stream::{BoxStream, StreamExt};
-use regex::Regex;
 use std::{sync::Arc, time::Duration};
 use tokio::{
     sync::mpsc,
@@ -29,8 +28,6 @@ use tokio::{
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::{error, info};
 use uuid::Uuid;
-
-use crate::bedrock::anthropic::remove_content_block;
 
 const PING_INTERVAL: Duration = Duration::from_secs(20);
 const EVENT_TX_SEND_TIMEOUT: Duration = Duration::from_secs(30);
@@ -214,31 +211,37 @@ pub struct BedrockV1MessagesProvider {
     bedrockruntime_client: Client,
 }
 
-/// Parse a thinking block modification error to extract the message and content block indices.
-/// Returns `Some((message_index, content_index))` if the error matches.
-///
-/// Expected error format:
-/// "messages.3.content.1: `thinking` or `redacted_thinking` blocks ... cannot be modified."
-fn parse_thinking_block_error(
-    err: &SdkError<ConverseStreamError>,
-) -> anyhow::Result<Option<(usize, usize)>> {
+/// Returns true if this is the Bedrock "thinking block modified" validation error.
+fn is_thinking_block_modified_error(err: &SdkError<ConverseStreamError>) -> bool {
     let Some(message) = err.as_service_error().and_then(|e| e.meta().message()) else {
-        return Ok(None);
+        return false;
     };
 
-    if !message.contains("`thinking` or `redacted_thinking` blocks in the latest assistant message cannot be modified") {
-        return Ok(None);
+    message.contains(
+        "`thinking` or `redacted_thinking` blocks in the latest assistant message cannot be modified",
+    )
+}
+
+fn get_retry_additional_model_request_fields(
+    additional_model_request_fields: Option<Document>,
+) -> Option<Document> {
+    let context_management_doc = Document::from(&ContextManagement {
+        edits: vec![ContextManagementEdit {
+            edit_type: "clear_thinking_20251015".to_string(),
+            keep: Keep::Number(0),
+        }],
+    });
+
+    match (additional_model_request_fields, context_management_doc) {
+        (Some(mut existing), Document::Object(context_management)) => {
+            if let Some(existing_map) = existing.as_object_mut() {
+                existing_map.extend(context_management);
+            }
+            Some(existing)
+        }
+        (None, doc) => Some(doc),
+        (Some(existing), _) => Some(existing),
     }
-
-    // Parse "messages.{N}.content.{M}" from the error message
-    let re = Regex::new(r"messages\.(\d+)\.content\.(\d+)")?;
-    let caps = re
-        .captures(message)
-        .ok_or_else(|| anyhow!("failed to parse message/content indices from: {message}"))?;
-    let msg_idx: usize = caps[1].parse()?;
-    let content_idx: usize = caps[2].parse()?;
-
-    Ok(Some((msg_idx, content_idx)))
 }
 
 impl BedrockV1MessagesProvider {
@@ -323,35 +326,26 @@ impl V1MessagesProvider for BedrockV1MessagesProvider {
                     info!("Successfully connected to Bedrock stream for Anthropic format");
                     response.stream
                 }
-                Err(e) => match parse_thinking_block_error(&e) {
-                    Ok(Some((msg_idx, content_idx))) => {
+                Err(e) => {
+                    if is_thinking_block_modified_error(&e) {
                         info!(
-                            "Thinking block error at messages.{}.content.{}, retrying with block removed",
-                            msg_idx, content_idx
+                            "Thinking block was modified; retrying with context_management.keep=0"
                         );
-                        let mut retry_messages = match bedrock_chat_completion.messages {
-                            Some(m) => m,
-                            None => {
-                                let _ = timeout(
-                                    EVENT_TX_SEND_TIMEOUT,
-                                    event_tx.send(Err(anyhow!(
-                                        "messages is None when retrying thinking block removal"
-                                    ))),
-                                )
-                                .await;
-                                return;
-                            }
-                        };
-                        remove_content_block(&mut retry_messages, msg_idx, content_idx);
+                        let retry_additional_model_request_fields =
+                            get_retry_additional_model_request_fields(
+                                additional_model_request_fields.clone(),
+                            );
 
                         let retry_fut = client
                             .converse_stream()
                             .model_id(&bedrock_chat_completion.model_id)
                             .set_system(bedrock_chat_completion.system_content_blocks)
-                            .set_messages(Some(retry_messages))
+                            .set_messages(bedrock_chat_completion.messages)
                             .set_tool_config(bedrock_chat_completion.tool_config)
                             .set_inference_config(Some(bedrock_chat_completion.inference_config))
-                            .set_additional_model_request_fields(additional_model_request_fields)
+                            .set_additional_model_request_fields(
+                                retry_additional_model_request_fields,
+                            )
                             .set_output_config(bedrock_chat_completion.output_config)
                             .send();
                         tokio::pin!(retry_fut);
@@ -366,7 +360,7 @@ impl V1MessagesProvider for BedrockV1MessagesProvider {
                         };
                         match retry_result {
                             Ok(response) => {
-                                info!("Retry succeeded after removing thinking block");
+                                info!("Retry succeeded with context_management.keep=0");
                                 response.stream
                             }
                             Err(e) => {
@@ -379,8 +373,7 @@ impl V1MessagesProvider for BedrockV1MessagesProvider {
                                 return;
                             }
                         }
-                    }
-                    Ok(None) => {
+                    } else {
                         error!("Bedrock API error: {:?}", e);
                         let _ = timeout(
                             EVENT_TX_SEND_TIMEOUT,
@@ -389,11 +382,7 @@ impl V1MessagesProvider for BedrockV1MessagesProvider {
                         .await;
                         return;
                     }
-                    Err(parse_err) => {
-                        let _ = timeout(EVENT_TX_SEND_TIMEOUT, event_tx.send(Err(parse_err))).await;
-                        return;
-                    }
-                },
+                }
             };
 
             process_bedrock_stream_events(stream, model, usage_callback, event_tx, ping_interval)
@@ -484,34 +473,34 @@ mod tests {
     }
 
     #[test]
-    fn parse_thinking_block_error_extracts_indices() {
+    fn is_thinking_block_modified_error_returns_true_for_matching_error() {
         let err = make_sdk_error(
             "The model returned the following errors: messages.3.content.1: \
              `thinking` or `redacted_thinking` blocks in the latest assistant \
              message cannot be modified.",
         );
-        assert_eq!(parse_thinking_block_error(&err).unwrap(), Some((3, 1)));
+        assert!(is_thinking_block_modified_error(&err));
     }
 
     #[test]
-    fn parse_thinking_block_error_returns_none_for_unrelated() {
+    fn is_thinking_block_modified_error_returns_false_for_unrelated() {
         let err = make_sdk_error("Some other validation error");
-        assert_eq!(parse_thinking_block_error(&err).unwrap(), None);
+        assert!(!is_thinking_block_modified_error(&err));
     }
 
     #[test]
-    fn parse_thinking_block_error_returns_none_for_missing_indices() {
+    fn is_thinking_block_modified_error_returns_false_for_partial_message() {
         let err = make_sdk_error("thinking blocks cannot be modified but no message index here");
-        assert_eq!(parse_thinking_block_error(&err).unwrap(), None);
+        assert!(!is_thinking_block_modified_error(&err));
     }
 
     #[test]
-    fn parse_thinking_block_error_zero_indices() {
+    fn is_thinking_block_modified_error_works_without_indices() {
         let err = make_sdk_error(
-            "The model returned the following errors: messages.0.content.0: \
+            "The model returned the following errors: \
              `thinking` or `redacted_thinking` blocks in the latest assistant \
              message cannot be modified.",
         );
-        assert_eq!(parse_thinking_block_error(&err).unwrap(), Some((0, 0)));
+        assert!(is_thinking_block_modified_error(&err));
     }
 }
