@@ -332,11 +332,13 @@ impl V1MessagesProvider for BedrockV1MessagesProvider {
                         let mut retry_messages = match bedrock_chat_completion.messages {
                             Some(m) => m,
                             None => {
-                                let _ = event_tx
-                                    .send(Err(anyhow!(
+                                let _ = timeout(
+                                    EVENT_TX_SEND_TIMEOUT,
+                                    event_tx.send(Err(anyhow!(
                                         "messages is None when retrying thinking block removal"
-                                    )))
-                                    .await;
+                                    ))),
+                                )
+                                .await;
                                 return;
                             }
                         };
@@ -369,22 +371,26 @@ impl V1MessagesProvider for BedrockV1MessagesProvider {
                             }
                             Err(e) => {
                                 error!("Bedrock API error on retry: {:?}", e);
-                                let _ = event_tx
-                                    .send(Err(anyhow!("Bedrock API error: {}", e)))
-                                    .await;
+                                let _ = timeout(
+                                    EVENT_TX_SEND_TIMEOUT,
+                                    event_tx.send(Err(anyhow!("Bedrock API error: {}", e))),
+                                )
+                                .await;
                                 return;
                             }
                         }
                     }
                     Ok(None) => {
                         error!("Bedrock API error: {:?}", e);
-                        let _ = event_tx
-                            .send(Err(anyhow!("Bedrock API error: {}", e)))
-                            .await;
+                        let _ = timeout(
+                            EVENT_TX_SEND_TIMEOUT,
+                            event_tx.send(Err(anyhow!("Bedrock API error: {}", e))),
+                        )
+                        .await;
                         return;
                     }
                     Err(parse_err) => {
-                        let _ = event_tx.send(Err(parse_err)).await;
+                        let _ = timeout(EVENT_TX_SEND_TIMEOUT, event_tx.send(Err(parse_err))).await;
                         return;
                     }
                 },
