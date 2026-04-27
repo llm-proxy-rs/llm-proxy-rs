@@ -1,7 +1,7 @@
 use anthropic_request::{
-    AssistantContent, AssistantContents, Message, Messages, UserContent, UserContents,
-    V1MessagesCountTokensRequest, V1MessagesRequest, build_tool_configuration,
-    get_additional_model_request_fields,
+    AssistantContent, AssistantContents, ContextManagement, ContextManagementEdit, Keep, Message,
+    Messages, UserContent, UserContents, V1MessagesCountTokensRequest, V1MessagesRequest,
+    build_tool_configuration, get_additional_model_request_fields,
 };
 use anthropic_response::EventConverter;
 use anyhow::anyhow;
@@ -20,7 +20,6 @@ use aws_sdk_bedrockruntime::{
 use aws_smithy_types::Document;
 use axum::response::sse::Event;
 use futures::stream::{BoxStream, StreamExt};
-use regex::Regex;
 use std::{sync::Arc, time::Duration};
 use tokio::{
     sync::mpsc,
@@ -30,78 +29,78 @@ use tokio_stream::wrappers::ReceiverStream;
 use tracing::{error, info};
 use uuid::Uuid;
 
-use crate::bedrock::anthropic::remove_content_block;
-
 const PING_INTERVAL: Duration = Duration::from_secs(20);
 const EVENT_TX_SEND_TIMEOUT: Duration = Duration::from_secs(30);
 
-fn process_bedrock_stream(
+/// Sends a ping SSE event. Returns false if the consumer is gone or stuck.
+async fn send_ping(event_tx: &mpsc::Sender<anyhow::Result<Event>>) -> bool {
+    info!("Sending ping event");
+    let ping_event = Ok(Event::default().event("ping").data(r#"{"type": "ping"}"#));
+    match timeout(EVENT_TX_SEND_TIMEOUT, event_tx.send(ping_event)).await {
+        Ok(Ok(())) => true,
+        Ok(Err(_)) => {
+            info!("SSE client disconnected, stopping Bedrock stream");
+            false
+        }
+        Err(_) => {
+            error!("Channel send timed out, consumer likely stuck");
+            false
+        }
+    }
+}
+
+async fn process_bedrock_stream_events(
     mut stream: EventReceiver<ConverseStreamOutput, ConverseStreamOutputError>,
     model: String,
     usage_callback: Arc<dyn Fn(&TokenUsage) + Send + Sync>,
-) -> BoxStream<'static, anyhow::Result<Event>> {
+    event_tx: mpsc::Sender<anyhow::Result<Event>>,
+    mut ping_interval: tokio::time::Interval,
+) {
     let id = format!("msg_{}", Uuid::new_v4());
-    let (event_tx, event_rx) = mpsc::channel::<anyhow::Result<Event>>(1);
-
-    tokio::spawn(async move {
-        let mut event_converter = EventConverter::new(id, model, usage_callback);
-        let mut ping_interval = interval_at(Instant::now() + PING_INTERVAL, PING_INTERVAL);
-        loop {
-            tokio::select! {
-                biased;
-                result = stream.recv() => {
-                    match result {
-                        Ok(Some(output)) => {
-                            if let Some(events) = event_converter.convert(&output) {
-                                for (event_name, event) in events {
-                                    let sse_event = match serde_json::to_string(&event) {
-                                        Ok(json) => Ok(Event::default().event(event_name).data(json)),
-                                        Err(e) => Err(anyhow!("Failed to serialize event: {}", e)),
-                                    };
-                                    match timeout(EVENT_TX_SEND_TIMEOUT, event_tx.send(sse_event)).await {
-                                        Ok(Ok(())) => {}
-                                        Ok(Err(_)) => {
-                                            info!("SSE client disconnected, stopping Bedrock stream");
-                                            return;
-                                        }
-                                        Err(_) => {
-                                            error!("Channel send timed out, consumer likely stuck");
-                                            return;
-                                        }
+    let mut event_converter = EventConverter::new(id, model, usage_callback);
+    loop {
+        tokio::select! {
+            biased;
+            result = stream.recv() => {
+                match result {
+                    Ok(Some(output)) => {
+                        if let Some(events) = event_converter.convert(&output) {
+                            for (event_name, event) in events {
+                                let sse_event = match serde_json::to_string(&event) {
+                                    Ok(json) => Ok(Event::default().event(event_name).data(json)),
+                                    Err(e) => Err(anyhow!("Failed to serialize event: {}", e)),
+                                };
+                                match timeout(EVENT_TX_SEND_TIMEOUT, event_tx.send(sse_event)).await {
+                                    Ok(Ok(())) => {}
+                                    Ok(Err(_)) => {
+                                        info!("SSE client disconnected, stopping Bedrock stream");
+                                        return;
+                                    }
+                                    Err(_) => {
+                                        error!("Channel send timed out, consumer likely stuck");
+                                        return;
                                     }
                                 }
                             }
                         }
-                        Ok(None) => break,
-                        Err(e) => {
-                            let _ = timeout(EVENT_TX_SEND_TIMEOUT, event_tx
-                                .send(Err(anyhow!("Stream receive error: {}", e))))
-                                .await;
-                            break;
-                        }
                     }
-                }
-                _ = ping_interval.tick() => {
-                    info!("Sending ping event");
-                    let ping_event = Ok(Event::default().event("ping").data(r#"{"type": "ping"}"#));
-                    match timeout(EVENT_TX_SEND_TIMEOUT, event_tx.send(ping_event)).await {
-                        Ok(Ok(())) => {}
-                        Ok(Err(_)) => {
-                            info!("SSE client disconnected, stopping Bedrock stream");
-                            return;
-                        }
-                        Err(_) => {
-                            error!("Channel send timed out, consumer likely stuck");
-                            return;
-                        }
+                    Ok(None) => break,
+                    Err(e) => {
+                        let _ = timeout(EVENT_TX_SEND_TIMEOUT, event_tx
+                            .send(Err(anyhow!("Stream receive error: {}", e))))
+                            .await;
+                        break;
                     }
                 }
             }
+            _ = ping_interval.tick() => {
+                if !send_ping(&event_tx).await {
+                    return;
+                }
+            }
         }
-        info!("Bedrock stream finished");
-    });
-
-    ReceiverStream::new(event_rx).boxed()
+    }
+    info!("Bedrock stream finished");
 }
 
 #[async_trait]
@@ -212,31 +211,37 @@ pub struct BedrockV1MessagesProvider {
     bedrockruntime_client: Client,
 }
 
-/// Parse a thinking block modification error to extract the message and content block indices.
-/// Returns `Some((message_index, content_index))` if the error matches.
-///
-/// Expected error format:
-/// "messages.3.content.1: `thinking` or `redacted_thinking` blocks ... cannot be modified."
-fn parse_thinking_block_error(
-    err: &SdkError<ConverseStreamError>,
-) -> anyhow::Result<Option<(usize, usize)>> {
+/// Returns true if this is the Bedrock "thinking block modified" validation error.
+fn is_thinking_block_modified_error(err: &SdkError<ConverseStreamError>) -> bool {
     let Some(message) = err.as_service_error().and_then(|e| e.meta().message()) else {
-        return Ok(None);
+        return false;
     };
 
-    if !message.contains("`thinking` or `redacted_thinking` blocks in the latest assistant message cannot be modified") {
-        return Ok(None);
+    message.contains(
+        "`thinking` or `redacted_thinking` blocks in the latest assistant message cannot be modified",
+    )
+}
+
+fn get_retry_additional_model_request_fields(
+    additional_model_request_fields: Option<Document>,
+) -> Option<Document> {
+    let context_management_doc = Document::from(&ContextManagement {
+        edits: vec![ContextManagementEdit {
+            edit_type: "clear_thinking_20251015".to_string(),
+            keep: Keep::Number(0),
+        }],
+    });
+
+    match (additional_model_request_fields, context_management_doc) {
+        (Some(mut existing), Document::Object(context_management)) => {
+            if let Some(existing_map) = existing.as_object_mut() {
+                existing_map.extend(context_management);
+            }
+            Some(existing)
+        }
+        (None, doc) => Some(doc),
+        (Some(existing), _) => Some(existing),
     }
-
-    // Parse "messages.{N}.content.{M}" from the error message
-    let re = Regex::new(r"messages\.(\d+)\.content\.(\d+)")?;
-    let caps = re
-        .captures(message)
-        .ok_or_else(|| anyhow!("failed to parse message/content indices from: {message}"))?;
-    let msg_idx: usize = caps[1].parse()?;
-    let content_idx: usize = caps[2].parse()?;
-
-    Ok(Some((msg_idx, content_idx)))
 }
 
 impl BedrockV1MessagesProvider {
@@ -266,6 +271,7 @@ impl V1MessagesProvider for BedrockV1MessagesProvider {
             request.thinking.as_ref(),
             request.output_config.as_ref(),
             anthropic_beta.as_deref(),
+            request.context_management.as_ref(),
         );
         if let Some(messages) = &bedrock_chat_completion.messages {
             log_bedrock_messages(messages);
@@ -283,70 +289,107 @@ impl V1MessagesProvider for BedrockV1MessagesProvider {
             bedrock_chat_completion.model_id
         );
 
-        let result = self
-            .bedrockruntime_client
-            .converse_stream()
-            .model_id(&bedrock_chat_completion.model_id)
-            .set_system(bedrock_chat_completion.system_content_blocks.clone())
-            .set_messages(bedrock_chat_completion.messages.clone())
-            .set_tool_config(bedrock_chat_completion.tool_config.clone())
-            .set_inference_config(Some(bedrock_chat_completion.inference_config.clone()))
-            .set_additional_model_request_fields(additional_model_request_fields.clone())
-            .set_output_config(bedrock_chat_completion.output_config.clone())
-            .send()
-            .await;
+        let (event_tx, event_rx) = mpsc::channel::<anyhow::Result<Event>>(1);
+        let usage_callback = Arc::new(usage_callback);
+        let client = self.bedrockruntime_client;
 
-        match result {
-            Ok(response) => {
-                info!("Successfully connected to Bedrock stream for Anthropic format");
-                let stream = response.stream;
-                let usage_callback = Arc::new(usage_callback);
+        // Spawn before awaiting converse_stream().send() so the handler can return the SSE
+        // response (flushing 200 + headers) immediately. The client then receives ping events
+        // while Bedrock's connect is still in flight. Trade-off: connect-time errors surface as
+        // SSE error events on a 200 response rather than an HTTP error status.
+        tokio::spawn(async move {
+            let mut ping_interval = interval_at(Instant::now() + PING_INTERVAL, PING_INTERVAL);
 
-                Ok(process_bedrock_stream(stream, model, usage_callback))
-            }
-            Err(e) => {
-                if let Some((msg_idx, content_idx)) = parse_thinking_block_error(&e)? {
-                    info!(
-                        "Thinking block error at messages.{}.content.{}, retrying with block removed",
-                        msg_idx, content_idx
-                    );
-
-                    let mut retry_messages = bedrock_chat_completion.messages.ok_or_else(|| {
-                        anyhow!("messages is None when retrying thinking block removal")
-                    })?;
-                    remove_content_block(&mut retry_messages, msg_idx, content_idx);
-
-                    let retry_result = self
-                        .bedrockruntime_client
-                        .converse_stream()
-                        .model_id(&bedrock_chat_completion.model_id)
-                        .set_system(bedrock_chat_completion.system_content_blocks)
-                        .set_messages(Some(retry_messages))
-                        .set_tool_config(bedrock_chat_completion.tool_config)
-                        .set_inference_config(Some(bedrock_chat_completion.inference_config))
-                        .set_additional_model_request_fields(additional_model_request_fields)
-                        .set_output_config(bedrock_chat_completion.output_config)
-                        .send()
-                        .await;
-
-                    match retry_result {
-                        Ok(response) => {
-                            info!("Retry succeeded after removing thinking block");
-                            let stream = response.stream;
-                            let usage_callback = Arc::new(usage_callback);
-                            Ok(process_bedrock_stream(stream, model, usage_callback))
-                        }
-                        Err(e) => {
-                            error!("Bedrock API error on retry: {:?}", e);
-                            Err(e.into())
-                        }
+            let send_fut = client
+                .converse_stream()
+                .model_id(&bedrock_chat_completion.model_id)
+                .set_system(bedrock_chat_completion.system_content_blocks.clone())
+                .set_messages(bedrock_chat_completion.messages.clone())
+                .set_tool_config(bedrock_chat_completion.tool_config.clone())
+                .set_inference_config(Some(bedrock_chat_completion.inference_config.clone()))
+                .set_additional_model_request_fields(additional_model_request_fields.clone())
+                .set_output_config(bedrock_chat_completion.output_config.clone())
+                .send();
+            tokio::pin!(send_fut);
+            let result = loop {
+                tokio::select! {
+                    biased;
+                    r = &mut send_fut => break r,
+                    _ = ping_interval.tick() => {
+                        if !send_ping(&event_tx).await { return; }
                     }
-                } else {
-                    error!("Bedrock API error: {:?}", e);
-                    Err(e.into())
                 }
-            }
-        }
+            };
+
+            let stream = match result {
+                Ok(response) => {
+                    info!("Successfully connected to Bedrock stream for Anthropic format");
+                    response.stream
+                }
+                Err(e) => {
+                    if is_thinking_block_modified_error(&e) {
+                        info!(
+                            "Thinking block was modified; retrying with context_management.keep=0"
+                        );
+                        let retry_additional_model_request_fields =
+                            get_retry_additional_model_request_fields(
+                                additional_model_request_fields.clone(),
+                            );
+
+                        let retry_fut = client
+                            .converse_stream()
+                            .model_id(&bedrock_chat_completion.model_id)
+                            .set_system(bedrock_chat_completion.system_content_blocks)
+                            .set_messages(bedrock_chat_completion.messages)
+                            .set_tool_config(bedrock_chat_completion.tool_config)
+                            .set_inference_config(Some(bedrock_chat_completion.inference_config))
+                            .set_additional_model_request_fields(
+                                retry_additional_model_request_fields,
+                            )
+                            .set_output_config(bedrock_chat_completion.output_config)
+                            .send();
+                        tokio::pin!(retry_fut);
+                        let retry_result = loop {
+                            tokio::select! {
+                                biased;
+                                r = &mut retry_fut => break r,
+                                _ = ping_interval.tick() => {
+                                    if !send_ping(&event_tx).await { return; }
+                                }
+                            }
+                        };
+                        match retry_result {
+                            Ok(response) => {
+                                info!("Retry succeeded with context_management.keep=0");
+                                response.stream
+                            }
+                            Err(e) => {
+                                error!("Bedrock API error on retry: {:?}", e);
+                                let _ = timeout(
+                                    EVENT_TX_SEND_TIMEOUT,
+                                    event_tx.send(Err(anyhow!("Bedrock API error: {}", e))),
+                                )
+                                .await;
+                                return;
+                            }
+                        }
+                    } else {
+                        error!("Bedrock API error: {:?}", e);
+                        let _ = timeout(
+                            EVENT_TX_SEND_TIMEOUT,
+                            event_tx.send(Err(anyhow!("Bedrock API error: {}", e))),
+                        )
+                        .await;
+                        return;
+                    }
+                }
+            };
+
+            process_bedrock_stream_events(stream, model, usage_callback, event_tx, ping_interval)
+                .await;
+        });
+
+        Ok(ReceiverStream::new(event_rx).boxed())
     }
 
     async fn v1_messages_count_tokens(
@@ -430,34 +473,34 @@ mod tests {
     }
 
     #[test]
-    fn parse_thinking_block_error_extracts_indices() {
+    fn is_thinking_block_modified_error_returns_true_for_matching_error() {
         let err = make_sdk_error(
             "The model returned the following errors: messages.3.content.1: \
              `thinking` or `redacted_thinking` blocks in the latest assistant \
              message cannot be modified.",
         );
-        assert_eq!(parse_thinking_block_error(&err).unwrap(), Some((3, 1)));
+        assert!(is_thinking_block_modified_error(&err));
     }
 
     #[test]
-    fn parse_thinking_block_error_returns_none_for_unrelated() {
+    fn is_thinking_block_modified_error_returns_false_for_unrelated() {
         let err = make_sdk_error("Some other validation error");
-        assert_eq!(parse_thinking_block_error(&err).unwrap(), None);
+        assert!(!is_thinking_block_modified_error(&err));
     }
 
     #[test]
-    fn parse_thinking_block_error_returns_none_for_missing_indices() {
+    fn is_thinking_block_modified_error_returns_false_for_partial_message() {
         let err = make_sdk_error("thinking blocks cannot be modified but no message index here");
-        assert_eq!(parse_thinking_block_error(&err).unwrap(), None);
+        assert!(!is_thinking_block_modified_error(&err));
     }
 
     #[test]
-    fn parse_thinking_block_error_zero_indices() {
+    fn is_thinking_block_modified_error_works_without_indices() {
         let err = make_sdk_error(
-            "The model returned the following errors: messages.0.content.0: \
+            "The model returned the following errors: \
              `thinking` or `redacted_thinking` blocks in the latest assistant \
              message cannot be modified.",
         );
-        assert_eq!(parse_thinking_block_error(&err).unwrap(), Some((0, 0)));
+        assert!(is_thinking_block_modified_error(&err));
     }
 }

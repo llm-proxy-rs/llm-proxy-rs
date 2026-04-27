@@ -129,6 +129,7 @@ impl ChatCompletionsProvider for BedrockChatCompletionsProvider {
             None,
             output_config.as_ref(),
             anthropic_beta.as_deref(),
+            None,
         );
         info!(
             "Processed OpenAI request to Bedrock format with {} messages",
