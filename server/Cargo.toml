@@ -7,20 +7,20 @@ edition = "2024"
 anyhow = "1.0.102"
 anthropic-request = { path = "../anthropic-request" }
 anthropic-response = { path = "../anthropic-response" }
-aws-config = "1.8.15"
-aws-sdk-bedrockruntime = "1.129.0"
+aws-config = "1.8.16"
+aws-sdk-bedrockruntime = "1.130.0"
 axum = "0.8.9"
 chat = { path = "../chat" }
 common = { path = "../common" }
 config = "0.15.22"
 request = { path = "../request" }
 response = { path = "../response" }
-tokio = { version = "1.52.0", features = ["full"] }
+tokio = { version = "1.52.1", features = ["full"] }
 tracing = "0.1.44"
 tracing-subscriber = "0.3.23"
 
 [dev-dependencies]
-aws-smithy-runtime-api = "1.11.6"
+aws-smithy-runtime-api = "1.12.0"
 aws-smithy-types = "1.4.7"
 base64 = "0.22.1"
 http-body-util = "0.1.3"

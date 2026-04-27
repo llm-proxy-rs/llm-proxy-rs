@@ -23,7 +23,11 @@ pub enum Keep {
 impl From<&Keep> for Document {
     fn from(keep: &Keep) -> Self {
         match keep {
-            Keep::String(s) => Document::String(s.clone()),
+            Keep::String(s) => Document::Object(
+                [("type".to_string(), Document::String(s.clone()))]
+                    .into_iter()
+                    .collect(),
+            ),
             Keep::Number(n) => Document::Object(
                 [
                     (
@@ -71,5 +75,33 @@ impl From<&ContextManagement> for Document {
             .into_iter()
             .collect(),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn keep_string_serializes_as_type_object() {
+        let doc = Document::from(&Keep::String("all".to_string()));
+        let Document::Object(map) = doc else {
+            panic!("expected object");
+        };
+        assert_eq!(map.len(), 1);
+        assert!(matches!(map.get("type"), Some(Document::String(s)) if s == "all"));
+    }
+
+    #[test]
+    fn keep_number_serializes_as_thinking_turns_object() {
+        let doc = Document::from(&Keep::Number(3));
+        let Document::Object(map) = doc else {
+            panic!("expected object");
+        };
+        assert!(matches!(map.get("type"), Some(Document::String(s)) if s == "thinking_turns"));
+        assert!(matches!(
+            map.get("value"),
+            Some(Document::Number(aws_smithy_types::Number::PosInt(3)))
+        ));
     }
 }
