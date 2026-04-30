@@ -58,6 +58,30 @@ pub struct V1MessagesRequest {
     pub context_management: Option<ContextManagement>,
 }
 
+impl V1MessagesRequest {
+    /// Clears the `thinking` text on every assistant `Thinking` content block in
+    /// `messages`, leaving `signature` untouched. Used on retry when Bedrock rejects
+    /// prior thinking blocks as modified.
+    pub fn blank_assistant_thinking_text(&mut self) {
+        let Messages::Array(messages) = &mut self.messages else {
+            return;
+        };
+        for message in messages {
+            let Message::Assistant { content } = message else {
+                continue;
+            };
+            let AssistantContents::Array(blocks) = content else {
+                continue;
+            };
+            for block in blocks {
+                if let AssistantContent::Thinking { thinking, .. } = block {
+                    thinking.clear();
+                }
+            }
+        }
+    }
+}
+
 #[derive(Debug, Deserialize, Serialize)]
 pub struct V1MessagesCountTokensRequest {
     pub messages: Messages,
@@ -221,5 +245,96 @@ mod tests {
             other => panic!("expected ToolResult, got {:?}", other),
         }
         assert!(matches!(m2.content()[1], ContentBlock::CachePoint(_)));
+    }
+
+    #[test]
+    fn blank_assistant_thinking_text_clears_thinking_preserves_signature() {
+        let json = serde_json::json!({
+            "model": "claude-opus-4-7",
+            "max_tokens": 1024,
+            "messages": [
+                {"role": "user", "content": "hello"},
+                {
+                    "role": "assistant",
+                    "content": [
+                        {"type": "thinking", "thinking": "secret reasoning", "signature": "sig-abc"},
+                        {"type": "text", "text": "hi"}
+                    ]
+                },
+                {"role": "user", "content": "next"}
+            ]
+        });
+        let mut request: V1MessagesRequest = serde_json::from_value(json).unwrap();
+        request.blank_assistant_thinking_text();
+
+        let Messages::Array(messages) = &request.messages else {
+            panic!("expected Array");
+        };
+        let Message::Assistant {
+            content: AssistantContents::Array(blocks),
+        } = &messages[1]
+        else {
+            panic!("expected assistant");
+        };
+        match &blocks[0] {
+            AssistantContent::Thinking {
+                thinking,
+                signature,
+            } => {
+                assert_eq!(thinking, "");
+                assert_eq!(signature, "sig-abc");
+            }
+            other => panic!("expected Thinking, got {:?}", other),
+        }
+        assert!(matches!(blocks[1], AssistantContent::Text { .. }));
+    }
+
+    #[test]
+    fn blank_assistant_thinking_text_leaves_non_thinking_untouched() {
+        let json = serde_json::json!({
+            "model": "claude-opus-4-7",
+            "max_tokens": 1024,
+            "messages": [
+                {
+                    "role": "assistant",
+                    "content": [
+                        {"type": "text", "text": "hello"},
+                        {"type": "redacted_thinking", "data": "opaque"}
+                    ]
+                }
+            ]
+        });
+        let mut request: V1MessagesRequest = serde_json::from_value(json).unwrap();
+        request.blank_assistant_thinking_text();
+
+        let Messages::Array(messages) = &request.messages else {
+            panic!("expected Array");
+        };
+        let Message::Assistant {
+            content: AssistantContents::Array(blocks),
+        } = &messages[0]
+        else {
+            panic!("expected assistant");
+        };
+        match &blocks[0] {
+            AssistantContent::Text { text, .. } => assert_eq!(text, "hello"),
+            other => panic!("expected Text, got {:?}", other),
+        }
+        match &blocks[1] {
+            AssistantContent::RedactedThinking { data } => assert_eq!(data, "opaque"),
+            other => panic!("expected RedactedThinking, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn blank_assistant_thinking_text_noop_on_string_messages() {
+        let json = serde_json::json!({
+            "model": "claude-opus-4-7",
+            "max_tokens": 1024,
+            "messages": "hello"
+        });
+        let mut request: V1MessagesRequest = serde_json::from_value(json).unwrap();
+        request.blank_assistant_thinking_text();
+        assert!(matches!(request.messages, Messages::String(ref s) if s == "hello"));
     }
 }

@@ -317,7 +317,7 @@ fn thinking_enabled_still_works() {
     let json = serde_json::json!({"type": "enabled", "budget_tokens": 5000});
     let thinking: Thinking = serde_json::from_value(json).unwrap();
     match thinking {
-        Thinking::Enabled { budget_tokens } => assert_eq!(budget_tokens, 5000),
+        Thinking::Enabled { budget_tokens, .. } => assert_eq!(budget_tokens, 5000),
         _ => panic!("expected Enabled variant"),
     }
 }
@@ -326,7 +326,7 @@ fn thinking_enabled_still_works() {
 fn thinking_adaptive() {
     let json = serde_json::json!({"type": "adaptive"});
     let thinking: Thinking = serde_json::from_value(json).unwrap();
-    assert!(matches!(thinking, Thinking::Adaptive));
+    assert!(matches!(thinking, Thinking::Adaptive { .. }));
 }
 
 #[test]
