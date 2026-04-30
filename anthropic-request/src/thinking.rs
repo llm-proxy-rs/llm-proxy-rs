@@ -1,7 +1,6 @@
-use std::collections::HashMap;
-
 use aws_smithy_types::Document;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
