@@ -18,6 +18,7 @@ async fn build_app() -> axum::Router {
         anthropic_beta_whitelist: vec![
             "context-1m-2025-08-07".to_string(),
             "context-management-2025-06-27".to_string(),
+            "effort-2025-11-24".to_string(),
         ],
     });
 
@@ -1295,5 +1296,238 @@ async fn v1_messages_with_context_management_keep_int() {
         event_types.last(),
         Some(&"message_stop"),
         "body: {body_str}"
+    );
+}
+
+#[tokio::test]
+#[ignore]
+async fn v1_messages_with_thinking_adaptive_display_summarized() {
+    let app = build_app().await;
+
+    let body = serde_json::json!({
+        "model": OPUS_4_7,
+        "max_tokens": 8192,
+        "stream": true,
+        "thinking": {
+            "type": "adaptive",
+            "display": "summarized"
+        },
+        "output_config": {"effort": "xhigh"},
+        "messages": [
+            {
+                "role": "user",
+                "content": "Please demonstrate your extended thinking. Before giving an answer, engage in detailed internal reasoning to work through this problem: prove that the square root of 2 is irrational."
+            }
+        ]
+    });
+
+    let request = axum::http::Request::builder()
+        .method("POST")
+        .uri("/v1/messages")
+        .header("content-type", "application/json")
+        .header("anthropic-beta", "effort-2025-11-24")
+        .body(Body::from(serde_json::to_vec(&body).unwrap()))
+        .unwrap();
+
+    let response = app.oneshot(request).await.unwrap();
+    let status = response.status();
+    let body_bytes = collect_body(response.into_body()).await;
+    let body_str = String::from_utf8(body_bytes.to_vec()).unwrap();
+    assert_eq!(status, 200, "expected 200, got: {body_str}");
+
+    let events = parse_sse_events(&body_str);
+    let event_types: Vec<&str> = events.iter().map(|(e, _)| e.as_str()).collect();
+    assert_eq!(event_types.first(), Some(&"message_start"));
+    assert_eq!(event_types.last(), Some(&"message_stop"));
+
+    let thinking_text = events
+        .iter()
+        .filter_map(|(_, data)| {
+            let v: serde_json::Value = serde_json::from_str(data).ok()?;
+            v.get("delta")
+                .and_then(|d| {
+                    (d.get("type").and_then(|t| t.as_str()) == Some("thinking_delta"))
+                        .then(|| d.get("thinking").and_then(|t| t.as_str()).map(String::from))
+                })
+                .flatten()
+        })
+        .collect::<String>();
+    assert!(
+        !thinking_text.is_empty(),
+        "expected non-empty summarized thinking text, got: {body_str}"
+    );
+}
+
+#[tokio::test]
+#[ignore]
+async fn v1_messages_with_thinking_adaptive_display_omitted() {
+    let app = build_app().await;
+
+    let body = serde_json::json!({
+        "model": OPUS_4_7,
+        "max_tokens": 2048,
+        "stream": true,
+        "thinking": {
+            "type": "adaptive",
+            "display": "omitted"
+        },
+        "output_config": {"effort": "xhigh"},
+        "messages": [
+            {
+                "role": "user",
+                "content": "Please demonstrate your extended thinking. Before giving an answer, engage in detailed internal reasoning to work through this problem: prove that the square root of 2 is irrational."
+            }
+        ]
+    });
+
+    let request = axum::http::Request::builder()
+        .method("POST")
+        .uri("/v1/messages")
+        .header("content-type", "application/json")
+        .body(Body::from(serde_json::to_vec(&body).unwrap()))
+        .unwrap();
+
+    let response = app.oneshot(request).await.unwrap();
+    let status = response.status();
+    let body_bytes = collect_body(response.into_body()).await;
+    let body_str = String::from_utf8(body_bytes.to_vec()).unwrap();
+    assert_eq!(status, 200, "expected 200, got: {body_str}");
+
+    let events = parse_sse_events(&body_str);
+    let event_types: Vec<&str> = events.iter().map(|(e, _)| e.as_str()).collect();
+    assert_eq!(event_types.first(), Some(&"message_start"));
+    assert_eq!(event_types.last(), Some(&"message_stop"));
+
+    let thinking_text = events
+        .iter()
+        .filter_map(|(_, data)| {
+            let v: serde_json::Value = serde_json::from_str(data).ok()?;
+            v.get("delta")
+                .and_then(|d| {
+                    (d.get("type").and_then(|t| t.as_str()) == Some("thinking_delta"))
+                        .then(|| d.get("thinking").and_then(|t| t.as_str()).map(String::from))
+                })
+                .flatten()
+        })
+        .collect::<String>();
+    assert!(
+        thinking_text.is_empty(),
+        "expected omitted thinking (no thinking_delta text), got: {thinking_text:?}"
+    );
+}
+
+#[tokio::test]
+#[ignore]
+async fn v1_messages_with_thinking_enabled_display_summarized() {
+    let app = build_app().await;
+
+    let body = serde_json::json!({
+        "model": OPUS_4_6,
+        "max_tokens": 8192,
+        "stream": true,
+        "thinking": {
+            "type": "enabled",
+            "budget_tokens": 4096,
+            "display": "summarized"
+        },
+        "messages": [
+            {
+                "role": "user",
+                "content": "Please demonstrate your extended thinking. Before giving an answer, engage in detailed internal reasoning to work through this problem: prove that the square root of 2 is irrational."
+            }
+        ]
+    });
+
+    let request = axum::http::Request::builder()
+        .method("POST")
+        .uri("/v1/messages")
+        .header("content-type", "application/json")
+        .body(Body::from(serde_json::to_vec(&body).unwrap()))
+        .unwrap();
+
+    let response = app.oneshot(request).await.unwrap();
+    let status = response.status();
+    let body_bytes = collect_body(response.into_body()).await;
+    let body_str = String::from_utf8(body_bytes.to_vec()).unwrap();
+    assert_eq!(status, 200, "expected 200, got: {body_str}");
+
+    let events = parse_sse_events(&body_str);
+    let event_types: Vec<&str> = events.iter().map(|(e, _)| e.as_str()).collect();
+    assert_eq!(event_types.first(), Some(&"message_start"));
+    assert_eq!(event_types.last(), Some(&"message_stop"));
+
+    let thinking_text = events
+        .iter()
+        .filter_map(|(_, data)| {
+            let v: serde_json::Value = serde_json::from_str(data).ok()?;
+            v.get("delta")
+                .and_then(|d| {
+                    (d.get("type").and_then(|t| t.as_str()) == Some("thinking_delta"))
+                        .then(|| d.get("thinking").and_then(|t| t.as_str()).map(String::from))
+                })
+                .flatten()
+        })
+        .collect::<String>();
+    assert!(
+        !thinking_text.is_empty(),
+        "expected non-empty summarized thinking text, got: {body_str}"
+    );
+}
+
+#[tokio::test]
+#[ignore]
+async fn v1_messages_with_thinking_enabled_display_omitted() {
+    let app = build_app().await;
+
+    let body = serde_json::json!({
+        "model": OPUS_4_6,
+        "max_tokens": 8192,
+        "stream": true,
+        "thinking": {
+            "type": "enabled",
+            "budget_tokens": 4096,
+            "display": "omitted"
+        },
+        "messages": [
+            {
+                "role": "user",
+                "content": "Please demonstrate your extended thinking. Before giving an answer, engage in detailed internal reasoning to work through this problem: prove that the square root of 2 is irrational."
+            }
+        ]
+    });
+
+    let request = axum::http::Request::builder()
+        .method("POST")
+        .uri("/v1/messages")
+        .header("content-type", "application/json")
+        .body(Body::from(serde_json::to_vec(&body).unwrap()))
+        .unwrap();
+
+    let response = app.oneshot(request).await.unwrap();
+    let status = response.status();
+    let body_bytes = collect_body(response.into_body()).await;
+    let body_str = String::from_utf8(body_bytes.to_vec()).unwrap();
+    assert_eq!(status, 200, "expected 200, got: {body_str}");
+
+    let events = parse_sse_events(&body_str);
+    let event_types: Vec<&str> = events.iter().map(|(e, _)| e.as_str()).collect();
+    assert_eq!(event_types.first(), Some(&"message_start"));
+    assert_eq!(event_types.last(), Some(&"message_stop"));
+
+    let thinking_text = events
+        .iter()
+        .filter_map(|(_, data)| {
+            let v: serde_json::Value = serde_json::from_str(data).ok()?;
+            v.get("delta")
+                .and_then(|d| {
+                    (d.get("type").and_then(|t| t.as_str()) == Some("thinking_delta"))
+                        .then(|| d.get("thinking").and_then(|t| t.as_str()).map(String::from))
+                })
+                .flatten()
+        })
+        .collect::<String>();
+    assert!(
+        thinking_text.is_empty(),
+        "expected omitted thinking (no thinking_delta text), got: {thinking_text:?}"
     );
 }

@@ -1,7 +1,7 @@
 use anthropic_request::{
-    AssistantContent, AssistantContents, ContextManagement, ContextManagementEdit, Keep, Message,
-    Messages, UserContent, UserContents, V1MessagesCountTokensRequest, V1MessagesRequest,
-    build_tool_configuration, get_additional_model_request_fields,
+    AssistantContent, AssistantContents, Message, Messages, UserContent, UserContents,
+    V1MessagesCountTokensRequest, V1MessagesRequest, build_tool_configuration,
+    get_additional_model_request_fields,
 };
 use anthropic_response::EventConverter;
 use anyhow::anyhow;
@@ -28,6 +28,8 @@ use tokio::{
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::{error, info};
 use uuid::Uuid;
+
+use crate::bedrock::BedrockChatCompletion;
 
 const PING_INTERVAL: Duration = Duration::from_secs(20);
 const EVENT_TX_SEND_TIMEOUT: Duration = Duration::from_secs(30);
@@ -222,26 +224,16 @@ fn is_thinking_block_modified_error(err: &SdkError<ConverseStreamError>) -> bool
     )
 }
 
-fn get_retry_additional_model_request_fields(
-    additional_model_request_fields: Option<Document>,
-) -> Option<Document> {
-    let context_management_doc = Document::from(&ContextManagement {
-        edits: vec![ContextManagementEdit {
-            edit_type: "clear_thinking_20251015".to_string(),
-            keep: Keep::Number(0),
-        }],
-    });
-
-    match (additional_model_request_fields, context_management_doc) {
-        (Some(mut existing), Document::Object(context_management)) => {
-            if let Some(existing_map) = existing.as_object_mut() {
-                existing_map.extend(context_management);
-            }
-            Some(existing)
-        }
-        (None, doc) => Some(doc),
-        (Some(existing), _) => Some(existing),
+/// Formats a Bedrock error for surfacing to the client. Prefers the service
+/// error message (e.g. "ValidationException: ...") over the generic SDK
+/// Display which otherwise shows only "service error".
+fn format_bedrock_error(err: &SdkError<ConverseStreamError>) -> String {
+    if let Some(service_err) = err.as_service_error()
+        && let Some(msg) = service_err.meta().message()
+    {
+        return format!("Bedrock API error: {msg}");
     }
+    format!("Bedrock API error: {err:?}")
 }
 
 impl BedrockV1MessagesProvider {
@@ -266,7 +258,7 @@ impl V1MessagesProvider for BedrockV1MessagesProvider {
     {
         let model = response_model_id.unwrap_or(request.model.clone());
         log_v1_messages_request(&request);
-        let bedrock_chat_completion = crate::bedrock::BedrockChatCompletion::try_from(&request)?;
+        let bedrock_chat_completion = BedrockChatCompletion::try_from(&request)?;
         let additional_model_request_fields = get_additional_model_request_fields(
             request.thinking.as_ref(),
             request.output_config.as_ref(),
@@ -329,24 +321,35 @@ impl V1MessagesProvider for BedrockV1MessagesProvider {
                 Err(e) => {
                     if is_thinking_block_modified_error(&e) {
                         info!(
-                            "Thinking block was modified; retrying with context_management.keep=0"
+                            "Thinking block was modified; retrying with prior thinking text blanked"
                         );
-                        let retry_additional_model_request_fields =
-                            get_retry_additional_model_request_fields(
-                                additional_model_request_fields.clone(),
-                            );
+                        let mut retry_request = request;
+                        retry_request.blank_assistant_thinking_text();
+                        let retry_bcc = match BedrockChatCompletion::try_from(&retry_request) {
+                            Ok(bcc) => bcc,
+                            Err(err) => {
+                                error!("Failed to rebuild Bedrock request for retry: {:?}", err);
+                                let _ = timeout(
+                                    EVENT_TX_SEND_TIMEOUT,
+                                    event_tx.send(Err(anyhow!(
+                                        "Failed to rebuild Bedrock request for retry: {}",
+                                        err
+                                    ))),
+                                )
+                                .await;
+                                return;
+                            }
+                        };
 
                         let retry_fut = client
                             .converse_stream()
-                            .model_id(&bedrock_chat_completion.model_id)
-                            .set_system(bedrock_chat_completion.system_content_blocks)
-                            .set_messages(bedrock_chat_completion.messages)
-                            .set_tool_config(bedrock_chat_completion.tool_config)
-                            .set_inference_config(Some(bedrock_chat_completion.inference_config))
-                            .set_additional_model_request_fields(
-                                retry_additional_model_request_fields,
-                            )
-                            .set_output_config(bedrock_chat_completion.output_config)
+                            .model_id(&retry_bcc.model_id)
+                            .set_system(retry_bcc.system_content_blocks)
+                            .set_messages(retry_bcc.messages)
+                            .set_tool_config(retry_bcc.tool_config)
+                            .set_inference_config(Some(retry_bcc.inference_config))
+                            .set_additional_model_request_fields(additional_model_request_fields)
+                            .set_output_config(retry_bcc.output_config)
                             .send();
                         tokio::pin!(retry_fut);
                         let retry_result = loop {
@@ -360,14 +363,14 @@ impl V1MessagesProvider for BedrockV1MessagesProvider {
                         };
                         match retry_result {
                             Ok(response) => {
-                                info!("Retry succeeded with context_management.keep=0");
+                                info!("Retry succeeded with prior thinking text blanked");
                                 response.stream
                             }
                             Err(e) => {
                                 error!("Bedrock API error on retry: {:?}", e);
                                 let _ = timeout(
                                     EVENT_TX_SEND_TIMEOUT,
-                                    event_tx.send(Err(anyhow!("Bedrock API error: {}", e))),
+                                    event_tx.send(Err(anyhow!(format_bedrock_error(&e)))),
                                 )
                                 .await;
                                 return;
@@ -377,7 +380,7 @@ impl V1MessagesProvider for BedrockV1MessagesProvider {
                         error!("Bedrock API error: {:?}", e);
                         let _ = timeout(
                             EVENT_TX_SEND_TIMEOUT,
-                            event_tx.send(Err(anyhow!("Bedrock API error: {}", e))),
+                            event_tx.send(Err(anyhow!(format_bedrock_error(&e)))),
                         )
                         .await;
                         return;

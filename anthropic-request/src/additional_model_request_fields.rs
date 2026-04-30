@@ -49,6 +49,7 @@ mod tests {
     fn get_additional_model_request_fields_merges_thinking_effort_and_beta() {
         let thinking = Thinking::Enabled {
             budget_tokens: 1024,
+            display: None,
         };
         let effort = OutputConfig::Effort {
             effort: "high".to_string(),
