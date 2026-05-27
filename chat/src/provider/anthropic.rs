@@ -283,13 +283,13 @@ impl V1MessagesProvider for BedrockV1MessagesProvider {
         let mut send_fut = Box::pin(
             client
                 .converse_stream()
-                .model_id(&bedrock_chat_completion.model_id)
-                .set_system(bedrock_chat_completion.system_content_blocks.clone())
-                .set_messages(bedrock_chat_completion.messages.clone())
-                .set_tool_config(bedrock_chat_completion.tool_config.clone())
-                .set_inference_config(Some(bedrock_chat_completion.inference_config.clone()))
+                .model_id(bedrock_chat_completion.model_id)
+                .set_system(bedrock_chat_completion.system_content_blocks)
+                .set_messages(bedrock_chat_completion.messages)
+                .set_tool_config(bedrock_chat_completion.tool_config)
+                .set_inference_config(Some(bedrock_chat_completion.inference_config))
                 .set_additional_model_request_fields(additional_model_request_fields.clone())
-                .set_output_config(bedrock_chat_completion.output_config.clone())
+                .set_output_config(bedrock_chat_completion.output_config)
                 .send(),
         );
 
@@ -310,39 +310,75 @@ impl V1MessagesProvider for BedrockV1MessagesProvider {
                 let mut retry_request = request;
                 retry_request.blank_assistant_thinking_text();
                 let retry_bcc = BedrockChatCompletion::try_from(&retry_request)?;
-                let response = client
-                    .converse_stream()
-                    .model_id(&retry_bcc.model_id)
-                    .set_system(retry_bcc.system_content_blocks)
-                    .set_messages(retry_bcc.messages)
-                    .set_tool_config(retry_bcc.tool_config)
-                    .set_inference_config(Some(retry_bcc.inference_config))
-                    .set_additional_model_request_fields(additional_model_request_fields)
-                    .set_output_config(retry_bcc.output_config)
-                    .send()
-                    .await
-                    .map_err(|e| {
+                let mut retry_fut = Box::pin(
+                    client
+                        .converse_stream()
+                        .model_id(retry_bcc.model_id)
+                        .set_system(retry_bcc.system_content_blocks)
+                        .set_messages(retry_bcc.messages)
+                        .set_tool_config(retry_bcc.tool_config)
+                        .set_inference_config(Some(retry_bcc.inference_config))
+                        .set_additional_model_request_fields(additional_model_request_fields)
+                        .set_output_config(retry_bcc.output_config)
+                        .send(),
+                );
+                match timeout(CONNECT_ERROR_WINDOW, &mut retry_fut).await {
+                    Ok(Ok(response)) => {
+                        info!("Retry succeeded with prior thinking text blanked");
+                        let ping_interval =
+                            interval_at(Instant::now() + PING_INTERVAL, PING_INTERVAL);
+                        tokio::spawn(process_bedrock_stream_events(
+                            response.stream,
+                            model,
+                            usage_callback,
+                            event_tx,
+                            ping_interval,
+                        ));
+                    }
+                    Ok(Err(e)) => {
                         error!("Bedrock API error on retry: {:?}", e);
-                        e
-                    })?;
-                info!("Retry succeeded with prior thinking text blanked");
-                let ping_interval = interval_at(Instant::now() + PING_INTERVAL, PING_INTERVAL);
-                tokio::spawn(process_bedrock_stream_events(
-                    response.stream,
-                    model,
-                    usage_callback,
-                    event_tx,
-                    ping_interval,
-                ));
+                        return Err(e.into());
+                    }
+                    Err(_) => {
+                        tokio::spawn(async move {
+                            let mut ping_interval =
+                                interval_at(Instant::now() + PING_INTERVAL, PING_INTERVAL);
+                            let result = loop {
+                                tokio::select! {
+                                    biased;
+                                    r = &mut retry_fut => break r,
+                                    _ = ping_interval.tick() => {
+                                        if !send_ping(&event_tx).await { return; }
+                                    }
+                                }
+                            };
+                            match result {
+                                Ok(response) => {
+                                    process_bedrock_stream_events(
+                                        response.stream,
+                                        model,
+                                        usage_callback,
+                                        event_tx,
+                                        ping_interval,
+                                    )
+                                    .await;
+                                }
+                                Err(e) => {
+                                    error!(
+                                        "Bedrock API error on retry after connect window: {:?}",
+                                        e
+                                    );
+                                }
+                            }
+                        });
+                    }
+                }
             }
             Ok(Err(e)) => {
                 error!("Bedrock API error: {:?}", e);
                 return Err(e.into());
             }
             Err(_) => {
-                // Window expired; spawn a task to keep polling the in-flight
-                // connect with pings. Thinking-block-modified is a fast error
-                // and would have surfaced inside the window — no retry needed.
                 tokio::spawn(async move {
                     let mut ping_interval =
                         interval_at(Instant::now() + PING_INTERVAL, PING_INTERVAL);
