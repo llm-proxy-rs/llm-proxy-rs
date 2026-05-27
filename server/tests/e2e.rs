@@ -1510,7 +1510,13 @@ async fn v1_messages_with_thinking_enabled_display_omitted() {
     assert_eq!(status, 200, "expected 200, got: {body_str}");
 
     let events = parse_sse_events(&body_str);
-    let event_types: Vec<&str> = events.iter().map(|(e, _)| e.as_str()).collect();
+    // `display=omitted` can stall Bedrock's first event past the 20s ping
+    // interval, so a keep-alive `ping` may legitimately precede `message_start`.
+    let event_types: Vec<&str> = events
+        .iter()
+        .map(|(e, _)| e.as_str())
+        .filter(|e| *e != "ping")
+        .collect();
     assert_eq!(event_types.first(), Some(&"message_start"));
     assert_eq!(event_types.last(), Some(&"message_stop"));
 
@@ -1530,4 +1536,37 @@ async fn v1_messages_with_thinking_enabled_display_omitted() {
         thinking_text.is_empty(),
         "expected omitted thinking (no thinking_delta text), got: {thinking_text:?}"
     );
+}
+
+/// Regression: a Bedrock validation failure that resolves within the connect
+/// window (sub-second) must surface as a proper HTTP 4xx — not a 200 SSE.
+/// The body carries the upstream Bedrock service-error message.
+#[tokio::test]
+#[ignore]
+async fn v1_messages_invalid_model_returns_http_4xx() {
+    let app = build_app().await;
+
+    let body = serde_json::json!({
+        "model": "global.anthropic.claude-does-not-exist-v1",
+        "max_tokens": 16,
+        "stream": true,
+        "messages": [{"role": "user", "content": "hello"}]
+    });
+
+    let request = axum::http::Request::builder()
+        .method("POST")
+        .uri("/v1/messages")
+        .header("content-type", "application/json")
+        .body(Body::from(serde_json::to_vec(&body).unwrap()))
+        .unwrap();
+
+    let response = app.oneshot(request).await.unwrap();
+    assert!(
+        response.status().is_client_error(),
+        "expected 4xx for invalid model, got {}",
+        response.status()
+    );
+
+    let body = String::from_utf8(collect_body(response.into_body()).await).unwrap();
+    assert!(!body.is_empty(), "expected non-empty body");
 }
