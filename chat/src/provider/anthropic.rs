@@ -3,7 +3,7 @@ use anthropic_request::{
     V1MessagesCountTokensRequest, V1MessagesRequest, build_tool_configuration,
     get_additional_model_request_fields,
 };
-use anthropic_response::EventConverter;
+use anthropic_response::{Event as AnthropicEvent, EventConverter};
 use anyhow::anyhow;
 use async_trait::async_trait;
 use aws_sdk_bedrockruntime::{
@@ -55,6 +55,51 @@ async fn send_ping(event_tx: &mpsc::Sender<anyhow::Result<Event>>) -> bool {
     }
 }
 
+/// Maps a Bedrock connect error to an Anthropic streaming error `type`, so the
+/// client retries throttling/overload but treats validation/auth as terminal.
+fn anthropic_error_type(err: &SdkError<ConverseStreamError>) -> &'static str {
+    match err.raw_response().map(|r| r.status().as_u16()) {
+        Some(400) => "invalid_request_error",
+        Some(401) => "authentication_error",
+        Some(403) => "permission_error",
+        Some(404) => "not_found_error",
+        Some(413) => "request_too_large",
+        Some(429) => "rate_limit_error",
+        Some(503) | Some(529) => "overloaded_error",
+        _ => "api_error",
+    }
+}
+
+/// Extracts the upstream Bedrock service message (e.g. the ValidationException
+/// text) to surface to the client, falling back to the SDK Debug output.
+fn format_bedrock_error(err: &SdkError<ConverseStreamError>) -> String {
+    err.as_service_error()
+        .and_then(|se| se.meta().message())
+        .map(String::from)
+        .unwrap_or_else(|| format!("{err:?}"))
+}
+
+/// Surfaces an error to the SSE client as a proper Anthropic `error` event.
+///
+/// Once the handler has returned `200 OK` the HTTP status is fixed, so a later
+/// failure can't become a 4xx. Emitting an `error` event — rather than logging
+/// and dropping the channel, or sending an `Err` that axum turns into a
+/// truncated body — gives the client a parseable, displayable error instead of
+/// a 200 response that never reaches `message_stop` (the "empty or malformed
+/// response" symptom seen during compaction).
+async fn send_stream_error(
+    event_tx: &mpsc::Sender<anyhow::Result<Event>>,
+    error_type: &str,
+    message: String,
+) {
+    error!("Surfacing error to SSE client [{error_type}]: {message}");
+    let sse_event = match serde_json::to_string(&AnthropicEvent::error(error_type, message)) {
+        Ok(json) => Ok(Event::default().event("error").data(json)),
+        Err(e) => Err(anyhow!("Failed to serialize error event: {e}")),
+    };
+    let _ = timeout(EVENT_TX_SEND_TIMEOUT, event_tx.send(sse_event)).await;
+}
+
 async fn process_bedrock_stream_events(
     mut stream: EventReceiver<ConverseStreamOutput, ConverseStreamOutputError>,
     model: String,
@@ -92,9 +137,12 @@ async fn process_bedrock_stream_events(
                     }
                     Ok(None) => break,
                     Err(e) => {
-                        let _ = timeout(EVENT_TX_SEND_TIMEOUT, event_tx
-                            .send(Err(anyhow!("Stream receive error: {}", e))))
-                            .await;
+                        send_stream_error(
+                            &event_tx,
+                            "api_error",
+                            format!("Stream receive error: {e}"),
+                        )
+                        .await;
                         break;
                     }
                 }
@@ -368,6 +416,12 @@ impl V1MessagesProvider for BedrockV1MessagesProvider {
                                         "Bedrock API error on retry after connect window: {:?}",
                                         e
                                     );
+                                    send_stream_error(
+                                        &event_tx,
+                                        anthropic_error_type(&e),
+                                        format_bedrock_error(&e),
+                                    )
+                                    .await;
                                 }
                             }
                         });
@@ -404,6 +458,12 @@ impl V1MessagesProvider for BedrockV1MessagesProvider {
                         }
                         Err(e) => {
                             error!("Bedrock API error after connect window: {:?}", e);
+                            send_stream_error(
+                                &event_tx,
+                                anthropic_error_type(&e),
+                                format_bedrock_error(&e),
+                            )
+                            .await;
                         }
                     }
                 });
@@ -491,6 +551,41 @@ mod tests {
                 .build(),
         );
         SdkError::service_error(err, raw)
+    }
+
+    #[test]
+    fn anthropic_error_type_maps_validation_to_invalid_request() {
+        let err = make_sdk_error("input is too long for requested model");
+        assert_eq!(anthropic_error_type(&err), "invalid_request_error");
+    }
+
+    #[test]
+    fn format_bedrock_error_extracts_service_message() {
+        let err = make_sdk_error("input is too long for requested model");
+        assert_eq!(
+            format_bedrock_error(&err),
+            "input is too long for requested model"
+        );
+    }
+
+    #[tokio::test]
+    async fn send_stream_error_emits_anthropic_error_event() {
+        let (tx, mut rx) = mpsc::channel::<anyhow::Result<Event>>(1);
+        send_stream_error(&tx, "invalid_request_error", "input is too long".to_string()).await;
+        drop(tx);
+
+        let event = rx
+            .recv()
+            .await
+            .expect("an event should have been sent")
+            .expect("the event should be Ok, not a stream-aborting Err");
+        // axum's SSE `Event` has no field getters, so assert on the wire form.
+        let wire = format!("{event:?}");
+        assert!(wire.contains("error"), "event name should be `error`: {wire}");
+        assert!(
+            wire.contains("invalid_request_error") && wire.contains("input is too long"),
+            "error payload should carry type and message: {wire}"
+        );
     }
 
     #[test]

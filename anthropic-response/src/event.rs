@@ -27,6 +27,8 @@ pub enum Event {
     MessageStart { message: Message },
     #[serde(rename = "message_stop")]
     MessageStop,
+    #[serde(rename = "error")]
+    Error { error: ErrorDetail },
 }
 
 impl Event {
@@ -52,6 +54,17 @@ impl Event {
 
     pub fn message_stop() -> Self {
         Event::MessageStop
+    }
+
+    /// Builds an Anthropic streaming `error` event, e.g.
+    /// `{"type":"error","error":{"type":"overloaded_error","message":"..."}}`.
+    pub fn error(error_type: impl Into<String>, message: impl Into<String>) -> Self {
+        Event::Error {
+            error: ErrorDetail {
+                error_type: error_type.into(),
+                message: message.into(),
+            },
+        }
     }
 }
 
@@ -292,6 +305,13 @@ impl ToolUseBlockBuilder {
 }
 
 #[derive(Debug, Default, Deserialize, Serialize)]
+pub struct ErrorDetail {
+    #[serde(rename = "type")]
+    pub error_type: String,
+    pub message: String,
+}
+
+#[derive(Debug, Default, Deserialize, Serialize)]
 pub struct MessageDeltaContent {
     pub stop_reason: Option<String>,
     pub stop_sequence: Option<String>,
@@ -355,6 +375,19 @@ impl UsageDeltaBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn error_event_serializes_to_anthropic_shape() {
+        let event = Event::error("overloaded_error", "Overloaded");
+        let json = serde_json::to_value(&event).unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "type": "error",
+                "error": {"type": "overloaded_error", "message": "Overloaded"}
+            })
+        );
+    }
 
     #[test]
     fn tool_use_builder_defaults_input_to_empty_object() {
