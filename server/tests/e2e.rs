@@ -1,6 +1,7 @@
 use aws_config::BehaviorVersion;
 use aws_sdk_bedrockruntime::Client;
 use axum::body::Body;
+use axum::extract::DefaultBodyLimit;
 use server::{AppState, get_app};
 use std::sync::Arc;
 use tower::ServiceExt;
@@ -1569,4 +1570,46 @@ async fn v1_messages_invalid_model_returns_http_4xx() {
 
     let body = String::from_utf8(collect_body(response.into_body()).await).unwrap();
     assert!(!body.is_empty(), "expected non-empty body");
+}
+
+/// Regression: input that exceeds the model's context window must surface as
+/// HTTP 400 with Bedrock's ValidationException message (e.g. "input is too
+/// long"), not a 200 SSE or a flattened 500. Opus 4.7 on Bedrock accepts up
+/// to ~1M tokens, so we send ~3.4MB of repeated English (≈1.4M tokens) and
+/// disable axum's 2MB default body limit to let the payload through to
+/// Bedrock.
+#[tokio::test]
+#[ignore]
+async fn v1_messages_context_window_exceeded_returns_http_400() {
+    let app = build_app().await.layer(DefaultBodyLimit::disable());
+
+    let oversized_text = "The quick brown fox jumps over the lazy dog. ".repeat(75_000);
+
+    let body = serde_json::json!({
+        "model": OPUS_4_7,
+        "max_tokens": 16,
+        "stream": true,
+        "messages": [{"role": "user", "content": oversized_text}]
+    });
+
+    let request = axum::http::Request::builder()
+        .method("POST")
+        .uri("/v1/messages")
+        .header("content-type", "application/json")
+        .body(Body::from(serde_json::to_vec(&body).unwrap()))
+        .unwrap();
+
+    let response = app.oneshot(request).await.unwrap();
+    let status = response.status();
+    let body_str = String::from_utf8(collect_body(response.into_body()).await).unwrap();
+
+    assert_eq!(
+        status,
+        axum::http::StatusCode::BAD_REQUEST,
+        "expected 400 for oversized input, got {status}: {body_str}"
+    );
+    assert!(
+        !body_str.is_empty(),
+        "expected non-empty body carrying the upstream Bedrock message"
+    );
 }
