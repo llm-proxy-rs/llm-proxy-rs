@@ -36,7 +36,7 @@ const EVENT_TX_SEND_TIMEOUT: Duration = Duration::from_secs(30);
 /// Synchronous window before falling to SSE + pings. Bedrock returns
 /// validation/throttle/access errors in <200ms; this catches them so they
 /// flow through `AppError` as proper HTTP 4xx with the upstream status code.
-const CONNECT_ERROR_WINDOW: Duration = Duration::from_secs(1);
+const CONNECT_ERROR_WINDOW: Duration = Duration::from_secs(15);
 
 /// Sends a ping SSE event. Returns false if the consumer is gone or stuck.
 async fn send_ping(event_tx: &mpsc::Sender<anyhow::Result<Event>>) -> bool {
