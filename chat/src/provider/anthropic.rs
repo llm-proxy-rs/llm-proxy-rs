@@ -38,6 +38,40 @@ const EVENT_TX_SEND_TIMEOUT: Duration = Duration::from_secs(30);
 /// flow through `AppError` as proper HTTP 4xx with the upstream status code.
 const CONNECT_ERROR_WINDOW: Duration = Duration::from_secs(15);
 
+/// Maps a Bedrock `ConverseStreamError` to an Anthropic error `type` and
+/// extracts the human-readable upstream message. Default arm falls back to
+/// `api_error` so newly-introduced Bedrock variants never panic.
+fn classify_bedrock_error(err: &SdkError<ConverseStreamError>) -> (&'static str, String) {
+    let msg = err
+        .as_service_error()
+        .and_then(|e| e.meta().message())
+        .map(String::from)
+        .unwrap_or_else(|| err.to_string());
+
+    let kind = match err.as_service_error() {
+        Some(ConverseStreamError::ValidationException(_)) => "invalid_request_error",
+        Some(ConverseStreamError::ThrottlingException(_)) => "rate_limit_error",
+        Some(ConverseStreamError::AccessDeniedException(_)) => "permission_error",
+        Some(ConverseStreamError::ServiceUnavailableException(_)) => "overloaded_error",
+        Some(ConverseStreamError::ModelTimeoutException(_)) => "timeout_error",
+        Some(ConverseStreamError::ModelStreamErrorException(_)) => "api_error",
+        Some(ConverseStreamError::InternalServerException(_)) => "api_error",
+        _ => "api_error",
+    };
+    (kind, msg)
+}
+
+/// Builds a single-line Anthropic-style SSE error frame. Used when the HTTP
+/// status has already been committed as 200 and we can no longer surface the
+/// failure as 4xx via `AppError`.
+fn anthropic_error_event(kind: &str, message: &str) -> anyhow::Result<Event> {
+    let payload = serde_json::json!({
+        "type": "error",
+        "error": { "type": kind, "message": message }
+    });
+    Ok(Event::default().event("error").data(payload.to_string()))
+}
+
 /// Sends a ping SSE event. Returns false if the consumer is gone or stuck.
 async fn send_ping(event_tx: &mpsc::Sender<anyhow::Result<Event>>) -> bool {
     info!("Sending ping event");
@@ -92,9 +126,11 @@ async fn process_bedrock_stream_events(
                     }
                     Ok(None) => break,
                     Err(e) => {
-                        let _ = timeout(EVENT_TX_SEND_TIMEOUT, event_tx
-                            .send(Err(anyhow!("Stream receive error: {}", e))))
-                            .await;
+                        let event = anthropic_error_event(
+                            "api_error",
+                            &format!("Stream receive error: {e}"),
+                        );
+                        let _ = timeout(EVENT_TX_SEND_TIMEOUT, event_tx.send(event)).await;
                         break;
                     }
                 }
@@ -368,6 +404,12 @@ impl V1MessagesProvider for BedrockV1MessagesProvider {
                                         "Bedrock API error on retry after connect window: {:?}",
                                         e
                                     );
+                                    let (kind, msg) = classify_bedrock_error(&e);
+                                    let _ = timeout(
+                                        EVENT_TX_SEND_TIMEOUT,
+                                        event_tx.send(anthropic_error_event(kind, &msg)),
+                                    )
+                                    .await;
                                 }
                             }
                         });
@@ -404,6 +446,12 @@ impl V1MessagesProvider for BedrockV1MessagesProvider {
                         }
                         Err(e) => {
                             error!("Bedrock API error after connect window: {:?}", e);
+                            let (kind, msg) = classify_bedrock_error(&e);
+                            let _ = timeout(
+                                EVENT_TX_SEND_TIMEOUT,
+                                event_tx.send(anthropic_error_event(kind, &msg)),
+                            )
+                            .await;
                         }
                     }
                 });
