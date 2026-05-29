@@ -185,6 +185,21 @@ mod tests {
     }
 
     #[test]
+    fn trailing_system_message_keeps_user_as_last_turn() {
+        let request = base_request(serde_json::json!({
+            "messages": [
+                {"role": "user", "content": "Hi"},
+                {"role": "system", "content": "Be terse."}
+            ]
+        }));
+        let result = BedrockChatCompletion::try_from(&request).unwrap();
+        // System content is forwarded as a user turn, so after strip_tool_blocks the
+        // conversation still ends with a user message.
+        let msgs = result.messages.unwrap();
+        assert_eq!(msgs.last().unwrap().role(), &ConversationRole::User);
+    }
+
+    #[test]
     fn tool_config_preserved_when_tools_and_tool_blocks_both_present() {
         let request = base_request(serde_json::json!({
             "tools": [{"name": "get_weather", "input_schema": {"type": "object"}}],

@@ -6,7 +6,7 @@ use server::{AppState, get_app};
 use std::sync::Arc;
 use tower::ServiceExt;
 
-const OPUS_4_7: &str = "global.anthropic.claude-opus-4-7";
+const OPUS_4_8: &str = "global.anthropic.claude-opus-4-8";
 const OPUS_4_6: &str = "global.anthropic.claude-opus-4-6-v1";
 
 async fn build_app() -> axum::Router {
@@ -66,7 +66,7 @@ async fn v1_messages_returns_complete_sse_stream() {
     let app = build_app().await;
 
     let body = serde_json::json!({
-        "model": OPUS_4_7,
+        "model": OPUS_4_8,
         "max_tokens": 64,
         "stream": true,
         "messages": [
@@ -122,11 +122,54 @@ async fn v1_messages_returns_complete_sse_stream() {
 
 #[tokio::test]
 #[ignore]
+async fn v1_messages_with_trailing_system_message_streams() {
+    let app = build_app().await;
+
+    // Mirrors newer Claude Code, which appends MCP-server instructions as a
+    // trailing `role: system` message in the messages array.
+    let body = serde_json::json!({
+        "model": OPUS_4_8,
+        "max_tokens": 64,
+        "stream": true,
+        "messages": [
+            {"role": "user", "content": "Say hi in exactly one word."},
+            {"role": "system", "content": "Always respond in lowercase."}
+        ]
+    });
+
+    let request = axum::http::Request::builder()
+        .method("POST")
+        .uri("/v1/messages")
+        .header("content-type", "application/json")
+        .body(Body::from(serde_json::to_vec(&body).unwrap()))
+        .unwrap();
+
+    let response = app.oneshot(request).await.unwrap();
+    let status = response.status();
+
+    let body_bytes = collect_body(response.into_body()).await;
+    let body_str = String::from_utf8(body_bytes.to_vec()).unwrap();
+
+    assert_eq!(status, 200, "non-200 response; body: {body_str}");
+
+    let events = parse_sse_events(&body_str);
+    let event_types: Vec<&str> = events.iter().map(|(e, _)| e.as_str()).collect();
+
+    assert_eq!(
+        event_types.first(),
+        Some(&"message_start"),
+        "expected a streamed response, got: {event_types:?}"
+    );
+    assert_eq!(event_types.last(), Some(&"message_stop"));
+}
+
+#[tokio::test]
+#[ignore]
 async fn chat_completions_returns_complete_sse_stream() {
     let app = build_app().await;
 
     let body = serde_json::json!({
-        "model": OPUS_4_7,
+        "model": OPUS_4_8,
         "max_tokens": 64,
         "stream": true,
         "messages": [
@@ -183,7 +226,7 @@ async fn v1_messages_with_tools_missing_referenced_tool() {
 
     // tools defines "search" but messages reference "get_weather" which is not in tools
     let body = serde_json::json!({
-        "model": OPUS_4_7,
+        "model": OPUS_4_8,
         "max_tokens": 64,
         "stream": true,
         "tools": [
@@ -283,7 +326,7 @@ async fn v1_messages_with_context_1m_beta() {
     let app = build_app().await;
 
     let body = serde_json::json!({
-        "model": OPUS_4_7,
+        "model": OPUS_4_8,
         "max_tokens": 64,
         "stream": true,
         "messages": [
@@ -326,7 +369,7 @@ async fn v1_messages_with_tool_reference_content() {
     let app = build_app().await;
 
     let body = serde_json::json!({
-        "model": OPUS_4_7,
+        "model": OPUS_4_8,
         "max_tokens": 64,
         "stream": true,
         "tools": [
@@ -409,7 +452,7 @@ async fn v1_messages_with_thinking_disabled() {
     let app = build_app().await;
 
     let body = serde_json::json!({
-        "model": OPUS_4_7,
+        "model": OPUS_4_8,
         "max_tokens": 64,
         "stream": true,
         "thinking": {"type": "disabled"},
@@ -465,7 +508,7 @@ async fn v1_messages_with_tools_no_tool_choice_does_not_force_tool_use() {
     let app = build_app().await;
 
     let body = serde_json::json!({
-        "model": OPUS_4_7,
+        "model": OPUS_4_8,
         "max_tokens": 64,
         "stream": true,
         "tools": [
@@ -532,7 +575,7 @@ async fn v1_messages_with_tool_choice_any_forces_tool_use() {
     let app = build_app().await;
 
     let body = serde_json::json!({
-        "model": OPUS_4_7,
+        "model": OPUS_4_8,
         "max_tokens": 256,
         "stream": true,
         "tools": [
@@ -602,7 +645,7 @@ async fn v1_messages_tool_result_with_image_and_cache_control() {
     let tiny_png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
 
     let body = serde_json::json!({
-        "model": OPUS_4_7,
+        "model": OPUS_4_8,
         "max_tokens": 64,
         "stream": true,
         "system": [
@@ -795,7 +838,7 @@ async fn v1_messages_with_tool_result_but_no_tools_field() {
     let app = build_app().await;
 
     let body = serde_json::json!({
-        "model": OPUS_4_7,
+        "model": OPUS_4_8,
         "max_tokens": 64,
         "stream": true,
         "messages": [
@@ -862,7 +905,7 @@ async fn chat_completions_with_tool_messages_but_no_tools_field() {
     let app = build_app().await;
 
     let body = serde_json::json!({
-        "model": OPUS_4_7,
+        "model": OPUS_4_8,
         "max_tokens": 64,
         "stream": true,
         "messages": [
@@ -939,7 +982,7 @@ async fn v1_messages_with_tools_config_missing_referenced_tool_multiple_rounds()
 
     // tools config defines "search" only, but messages reference "bash" which is not in tools
     let body = serde_json::json!({
-        "model": OPUS_4_7,
+        "model": OPUS_4_8,
         "max_tokens": 64,
         "stream": true,
         "tools": [
@@ -1076,7 +1119,7 @@ startxref
     let pdf_data_b = general_purpose::STANDARD.encode(pdf_b);
 
     let body = serde_json::json!({
-        "model": OPUS_4_7,
+        "model": OPUS_4_8,
         "max_tokens": 64,
         "stream": true,
         "messages": [{
@@ -1306,7 +1349,7 @@ async fn v1_messages_with_thinking_adaptive_display_summarized() {
     let app = build_app().await;
 
     let body = serde_json::json!({
-        "model": OPUS_4_7,
+        "model": OPUS_4_8,
         "max_tokens": 8192,
         "stream": true,
         "thinking": {
@@ -1365,7 +1408,7 @@ async fn v1_messages_with_thinking_adaptive_display_omitted() {
     let app = build_app().await;
 
     let body = serde_json::json!({
-        "model": OPUS_4_7,
+        "model": OPUS_4_8,
         "max_tokens": 2048,
         "stream": true,
         "thinking": {
@@ -1586,7 +1629,7 @@ async fn v1_messages_context_window_exceeded_returns_http_400() {
     let oversized_text = "The quick brown fox jumps over the lazy dog. ".repeat(75_000);
 
     let body = serde_json::json!({
-        "model": OPUS_4_7,
+        "model": OPUS_4_8,
         "max_tokens": 16,
         "stream": true,
         "messages": [{"role": "user", "content": oversized_text}]

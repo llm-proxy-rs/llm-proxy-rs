@@ -164,6 +164,25 @@ pub trait V1MessagesProvider {
     ) -> anyhow::Result<i32>;
 }
 
+fn describe_user_contents(content: &UserContents) -> String {
+    match content {
+        UserContents::String(s) => format!("String(len={})", s.len()),
+        UserContents::Array(arr) => arr
+            .iter()
+            .map(|c| match c {
+                UserContent::Document { .. } => "Document",
+                UserContent::Image { .. } => "Image",
+                UserContent::Text { .. } => "Text",
+                UserContent::ToolResult { .. } => "ToolResult",
+                UserContent::Thinking { .. } => "Thinking",
+                UserContent::RedactedThinking { .. } => "RedactedThinking",
+                UserContent::ServerToolResult { .. } => "ServerToolResult",
+            })
+            .collect::<Vec<_>>()
+            .join(", "),
+    }
+}
+
 fn log_v1_messages_request(request: &V1MessagesRequest) {
     match &request.messages {
         Messages::String(s) => {
@@ -176,25 +195,17 @@ fn log_v1_messages_request(request: &V1MessagesRequest) {
             for (i, message) in messages.iter().enumerate() {
                 match message {
                     Message::User { content } => {
-                        let user_content_types = match content {
-                            UserContents::String(s) => format!("String(len={})", s.len()),
-                            UserContents::Array(arr) => arr
-                                .iter()
-                                .map(|c| match c {
-                                    UserContent::Document { .. } => "Document",
-                                    UserContent::Image { .. } => "Image",
-                                    UserContent::Text { .. } => "Text",
-                                    UserContent::ToolResult { .. } => "ToolResult",
-                                    UserContent::Thinking { .. } => "Thinking",
-                                    UserContent::RedactedThinking { .. } => "RedactedThinking",
-                                    UserContent::ServerToolResult { .. } => "ServerToolResult",
-                                })
-                                .collect::<Vec<_>>()
-                                .join(", "),
-                        };
                         info!(
                             "V1 Messages Request Message {}: role=user, content=[{}]",
-                            i, user_content_types
+                            i,
+                            describe_user_contents(content)
+                        );
+                    }
+                    Message::System { content } => {
+                        info!(
+                            "V1 Messages Request Message {}: role=system, content=[{}]",
+                            i,
+                            describe_user_contents(content)
                         );
                     }
                     Message::Assistant { content } => {

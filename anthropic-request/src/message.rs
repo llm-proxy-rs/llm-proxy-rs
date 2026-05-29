@@ -14,10 +14,9 @@ pub enum Messages {
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(tag = "role", rename_all = "lowercase")]
 pub enum Message {
-    #[serde(rename = "assistant")]
     Assistant { content: AssistantContents },
-    #[serde(rename = "user")]
     User { content: UserContents },
+    System { content: UserContents },
 }
 
 impl Message {
@@ -45,6 +44,18 @@ impl Message {
                 Ok(BedrockMessage::builder()
                     .role(ConversationRole::Assistant)
                     .set_content(Some(content))
+                    .build()?)
+            }
+            Message::System { content } => {
+                // Claude Opus 4.8 on Bedrock rejects a `system` role in the messages list
+                // ("This model doesn't support system messages. Try again without a
+                // system message or use a model that supports system messages."), so
+                // forward system content as a user turn instead.
+                let content_blocks = content.to_content_blocks(counter)?;
+
+                Ok(BedrockMessage::builder()
+                    .role(ConversationRole::User)
+                    .set_content(Some(content_blocks))
                     .build()?)
             }
         }
@@ -163,5 +174,55 @@ mod tests {
             ContentBlock::Text(text) => assert_eq!(text, "just a string"),
             other => panic!("expected Text, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn system_message_converted_to_user() {
+        let json = serde_json::json!({
+            "role": "system",
+            "content": "# MCP Server Instructions"
+        });
+        let message: Message = serde_json::from_value(json).unwrap();
+        let bedrock = message.to_bedrock_message(&DocumentCounter::new()).unwrap();
+        assert_eq!(bedrock.role(), &ConversationRole::User);
+        assert_eq!(bedrock.content().len(), 1);
+        match &bedrock.content()[0] {
+            ContentBlock::Text(text) => assert_eq!(text, "# MCP Server Instructions"),
+            other => panic!("expected Text, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn system_message_with_cache_control_converted_to_user() {
+        let json = serde_json::json!({
+            "role": "system",
+            "content": [
+                {"type": "text", "text": "cached instructions", "cache_control": {"type": "ephemeral"}}
+            ]
+        });
+        let message: Message = serde_json::from_value(json).unwrap();
+        let bedrock = message.to_bedrock_message(&DocumentCounter::new()).unwrap();
+        assert_eq!(bedrock.role(), &ConversationRole::User);
+        assert_eq!(bedrock.content().len(), 2);
+        match &bedrock.content()[0] {
+            ContentBlock::Text(text) => assert_eq!(text, "cached instructions"),
+            other => panic!("expected Text, got {:?}", other),
+        }
+        assert!(matches!(bedrock.content()[1], ContentBlock::CachePoint(_)));
+    }
+
+    #[test]
+    fn trailing_system_message_becomes_user_turn() {
+        let json = serde_json::json!([
+            {"role": "user", "content": "hi"},
+            {"role": "system", "content": "instructions"}
+        ]);
+        let messages: Messages = serde_json::from_value(json).unwrap();
+        let bedrock = Option::<Vec<BedrockMessage>>::try_from(&messages)
+            .unwrap()
+            .unwrap();
+        assert_eq!(bedrock.len(), 2);
+        assert_eq!(bedrock[0].role(), &ConversationRole::User);
+        assert_eq!(bedrock[1].role(), &ConversationRole::User);
     }
 }
