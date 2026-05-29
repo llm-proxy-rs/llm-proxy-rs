@@ -90,6 +90,19 @@ fn request_with_metadata() {
 }
 
 #[test]
+fn request_with_trailing_system_message() {
+    let json = serde_json::json!({
+        "model": "claude-sonnet-4-20250514",
+        "max_tokens": 1024,
+        "messages": [
+            {"role": "user", "content": [{"type": "text", "text": "hi"}]},
+            {"role": "system", "content": "# MCP Server Instructions"}
+        ]
+    });
+    let _req: V1MessagesRequest = serde_json::from_value(json).unwrap();
+}
+
+#[test]
 fn request_with_all_optional_fields() {
     let json = serde_json::json!({
         "model": "claude-sonnet-4-20250514",

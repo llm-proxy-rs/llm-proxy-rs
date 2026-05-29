@@ -8,7 +8,7 @@ anyhow = "1.0.102"
 anthropic-request = { path = "../anthropic-request" }
 anthropic-response = { path = "../anthropic-response" }
 aws-config = "1.8.17"
-aws-sdk-bedrockruntime = "1.131.0"
+aws-sdk-bedrockruntime = "1.132.0"
 axum = "0.8.9"
 chat = { path = "../chat" }
 common = { path = "../common" }
