@@ -15,6 +15,8 @@ pub struct EventConverter {
     model: String,
     previous_converse_stream_output_type_is_message_start_or_content_block_stop: bool,
     stop_reason: Option<String>,
+    started: bool,
+    terminated: bool,
     usage_callback: Arc<dyn Fn(&TokenUsage) + Send + Sync>,
 }
 
@@ -29,6 +31,8 @@ impl EventConverter {
             model,
             previous_converse_stream_output_type_is_message_start_or_content_block_stop: false,
             stop_reason: None,
+            started: false,
+            terminated: false,
             usage_callback,
         }
     }
@@ -41,6 +45,7 @@ impl EventConverter {
             ConverseStreamOutput::MessageStart(_) => {
                 self.previous_converse_stream_output_type_is_message_start_or_content_block_stop =
                     true;
+                self.started = true;
                 Some(vec![(
                     "message_start",
                     Event::message_start_builder()
@@ -155,6 +160,7 @@ impl EventConverter {
                 if let Some(ref usage) = event.usage {
                     (self.usage_callback)(usage);
                 }
+                self.terminated = true;
 
                 Some(vec![
                     (
@@ -193,5 +199,116 @@ impl EventConverter {
             }
             _ => None,
         }
+    }
+
+    /// Synthesizes the terminating `message_delta` + `message_stop` SSE pair
+    /// when the upstream Bedrock stream ended without a `Metadata` event
+    /// (e.g. an intermediate gateway truncated the tail). Idempotent and a
+    /// no-op once the converter has already emitted the terminator via the
+    /// `Metadata` arm, or if `MessageStart` was never seen.
+    ///
+    /// Usage is reported as zero — the upstream `usage_callback` never fires
+    /// when `Metadata` is missing, but the client at least gets a well-formed
+    /// stream end with the `stop_reason` recorded from `MessageStop`.
+    pub fn finalize(&mut self) -> Option<Vec<(&'static str, Event)>> {
+        if !self.started || self.terminated {
+            return None;
+        }
+        self.terminated = true;
+        Some(vec![
+            (
+                "message_delta",
+                Event::message_delta_builder()
+                    .delta(MessageDeltaContent {
+                        stop_reason: self.stop_reason.clone(),
+                        stop_sequence: None,
+                    })
+                    .usage(UsageDelta::builder().build())
+                    .build(),
+            ),
+            ("message_stop", Event::message_stop()),
+        ])
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aws_sdk_bedrockruntime::types::{
+        ConversationRole, ConverseStreamMetadataEvent, MessageStartEvent, MessageStopEvent,
+    };
+
+    fn converter() -> EventConverter {
+        EventConverter::new(
+            "msg_test".to_string(),
+            "model_test".to_string(),
+            Arc::new(|_| {}),
+        )
+    }
+
+    fn message_start() -> ConverseStreamOutput {
+        ConverseStreamOutput::MessageStart(
+            MessageStartEvent::builder()
+                .role(ConversationRole::Assistant)
+                .build()
+                .unwrap(),
+        )
+    }
+
+    fn message_stop() -> ConverseStreamOutput {
+        ConverseStreamOutput::MessageStop(
+            MessageStopEvent::builder()
+                .stop_reason(StopReason::EndTurn)
+                .build()
+                .unwrap(),
+        )
+    }
+
+    fn metadata() -> ConverseStreamOutput {
+        ConverseStreamOutput::Metadata(ConverseStreamMetadataEvent::builder().build())
+    }
+
+    #[test]
+    fn finalize_emits_terminator_when_metadata_missing() {
+        let mut conv = converter();
+        let _ = conv.convert(&message_start());
+        let _ = conv.convert(&message_stop());
+
+        let events = conv.finalize().expect("finalize should emit a terminator");
+
+        let names: Vec<_> = events.iter().map(|(name, _)| *name).collect();
+        assert_eq!(names, vec!["message_delta", "message_stop"]);
+
+        let (_, delta) = &events[0];
+        let json = serde_json::to_value(delta).unwrap();
+        assert_eq!(json["delta"]["stop_reason"], "end_turn");
+        assert_eq!(json["usage"]["input_tokens"], 0);
+        assert_eq!(json["usage"]["output_tokens"], 0);
+    }
+
+    #[test]
+    fn finalize_is_noop_after_metadata_already_terminated_stream() {
+        let mut conv = converter();
+        let _ = conv.convert(&message_start());
+        let _ = conv.convert(&message_stop());
+        let _ = conv.convert(&metadata());
+
+        assert!(conv.finalize().is_none());
+    }
+
+    #[test]
+    fn finalize_is_noop_before_message_start() {
+        let mut conv = converter();
+        assert!(conv.finalize().is_none());
+    }
+
+    #[test]
+    fn finalize_is_idempotent() {
+        let mut conv = converter();
+        let _ = conv.convert(&message_start());
+        let _ = conv.convert(&message_stop());
+
+        assert!(conv.finalize().is_some());
+        assert!(conv.finalize().is_none());
     }
 }
