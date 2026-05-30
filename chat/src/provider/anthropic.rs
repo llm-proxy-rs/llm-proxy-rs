@@ -4,7 +4,6 @@ use anthropic_request::{
     get_additional_model_request_fields,
 };
 use anthropic_response::EventConverter;
-use anyhow::anyhow;
 use async_trait::async_trait;
 use aws_sdk_bedrockruntime::{
     Client,
@@ -98,7 +97,7 @@ async fn process_bedrock_stream_events(
 ) {
     let id = format!("msg_{}", Uuid::new_v4());
     let mut event_converter = EventConverter::new(id, model, usage_callback);
-    loop {
+    'outer: loop {
         tokio::select! {
             biased;
             result = stream.recv() => {
@@ -106,9 +105,16 @@ async fn process_bedrock_stream_events(
                     Ok(Some(output)) => {
                         if let Some(events) = event_converter.convert(&output) {
                             for (event_name, event) in events {
+                                let mut serde_failed = false;
                                 let sse_event = match serde_json::to_string(&event) {
                                     Ok(json) => Ok(Event::default().event(event_name).data(json)),
-                                    Err(e) => Err(anyhow!("Failed to serialize event: {}", e)),
+                                    Err(e) => {
+                                        serde_failed = true;
+                                        anthropic_error_event(
+                                            "api_error",
+                                            &format!("Failed to serialize event: {e}"),
+                                        )
+                                    }
                                 };
                                 match timeout(EVENT_TX_SEND_TIMEOUT, event_tx.send(sse_event)).await {
                                     Ok(Ok(())) => {}
@@ -121,17 +127,39 @@ async fn process_bedrock_stream_events(
                                         return;
                                     }
                                 }
+                                if serde_failed {
+                                    error!("Event serialization failed; terminating stream");
+                                    break 'outer;
+                                }
                             }
                         }
                     }
-                    Ok(None) => break,
+                    Ok(None) => {
+                        // Bedrock closed the stream cleanly. If `Metadata` never arrived
+                        // (e.g. a gateway truncated the tail), synthesize the terminating
+                        // pair so the client sees a well-formed end instead of EOF
+                        // mid-protocol.
+                        if let Some(events) = event_converter.finalize() {
+                            for (event_name, event) in events {
+                                let sse_event = match serde_json::to_string(&event) {
+                                    Ok(json) => Ok(Event::default().event(event_name).data(json)),
+                                    Err(e) => anthropic_error_event(
+                                        "api_error",
+                                        &format!("Failed to serialize event: {e}"),
+                                    ),
+                                };
+                                let _ = timeout(EVENT_TX_SEND_TIMEOUT, event_tx.send(sse_event)).await;
+                            }
+                        }
+                        break 'outer;
+                    }
                     Err(e) => {
                         let event = anthropic_error_event(
                             "api_error",
                             &format!("Stream receive error: {e}"),
                         );
                         let _ = timeout(EVENT_TX_SEND_TIMEOUT, event_tx.send(event)).await;
-                        break;
+                        break 'outer;
                     }
                 }
             }
