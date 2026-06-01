@@ -91,12 +91,13 @@ async fn send_ping(event_tx: &mpsc::Sender<anyhow::Result<Event>>) -> bool {
 async fn process_bedrock_stream_events(
     mut stream: EventReceiver<ConverseStreamOutput, ConverseStreamOutputError>,
     model: String,
+    stop_sequences: Option<Vec<String>>,
     usage_callback: Arc<dyn Fn(&TokenUsage) + Send + Sync>,
     event_tx: mpsc::Sender<anyhow::Result<Event>>,
     mut ping_interval: tokio::time::Interval,
 ) {
     let id = format!("msg_{}", Uuid::new_v4());
-    let mut event_converter = EventConverter::new(id, model, usage_callback);
+    let mut event_converter = EventConverter::new(id, model, stop_sequences, usage_callback);
     'outer: loop {
         tokio::select! {
             biased;
@@ -324,6 +325,7 @@ impl V1MessagesProvider for BedrockV1MessagesProvider {
         F: Fn(&TokenUsage) + Send + Sync + 'static,
     {
         let model = response_model_id.unwrap_or(request.model.clone());
+        let stop_sequences = request.stop_sequences.clone();
         log_v1_messages_request(&request);
         let bedrock_chat_completion = BedrockChatCompletion::try_from(&request)?;
         let additional_model_request_fields = get_additional_model_request_fields(
@@ -375,6 +377,7 @@ impl V1MessagesProvider for BedrockV1MessagesProvider {
                 tokio::spawn(process_bedrock_stream_events(
                     response.stream,
                     model,
+                    stop_sequences,
                     usage_callback,
                     event_tx,
                     ping_interval,
@@ -405,6 +408,7 @@ impl V1MessagesProvider for BedrockV1MessagesProvider {
                         tokio::spawn(process_bedrock_stream_events(
                             response.stream,
                             model,
+                            stop_sequences,
                             usage_callback,
                             event_tx,
                             ping_interval,
@@ -432,6 +436,7 @@ impl V1MessagesProvider for BedrockV1MessagesProvider {
                                     process_bedrock_stream_events(
                                         response.stream,
                                         model,
+                                        stop_sequences,
                                         usage_callback,
                                         event_tx,
                                         ping_interval,
@@ -477,6 +482,7 @@ impl V1MessagesProvider for BedrockV1MessagesProvider {
                             process_bedrock_stream_events(
                                 response.stream,
                                 model,
+                                stop_sequences,
                                 usage_callback,
                                 event_tx,
                                 ping_interval,
