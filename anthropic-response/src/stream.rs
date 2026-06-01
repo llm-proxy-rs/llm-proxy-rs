@@ -23,6 +23,11 @@ pub struct EventConverter {
     /// The `stop_sequences` configured on the originating request, used to
     /// reconstruct the matched sequence (see `stop_sequence`).
     request_stop_sequences: Option<Vec<String>>,
+    /// Index of a `content_block_stop` whose emission is deferred. Bedrock sends
+    /// `ContentBlockStop` *before* `MessageStop` (where we learn a stop sequence
+    /// was hit), so we buffer the stop and only flush it once we know whether to
+    /// inject the matched sequence as a trailing text delta first.
+    pending_content_block_stop: Option<i32>,
     started: bool,
     terminated: bool,
     usage_callback: Arc<dyn Fn(&TokenUsage) + Send + Sync>,
@@ -42,9 +47,22 @@ impl EventConverter {
             stop_reason: None,
             stop_sequence: None,
             request_stop_sequences,
+            pending_content_block_stop: None,
             started: false,
             terminated: false,
             usage_callback,
+        }
+    }
+
+    /// Emits any buffered `content_block_stop` and clears it. Returns an empty
+    /// vec when nothing is pending so callers can freely prepend the result.
+    fn flush_pending_content_block_stop(&mut self) -> Vec<(&'static str, Event)> {
+        match self.pending_content_block_stop.take() {
+            Some(index) => vec![(
+                "content_block_stop",
+                Event::content_block_stop_builder().index(index).build(),
+            )],
+            None => vec![],
         }
     }
 
@@ -74,35 +92,36 @@ impl EventConverter {
             ConverseStreamOutput::ContentBlockStart(event) => {
                 self.previous_converse_stream_output_type_is_message_start_or_content_block_stop =
                     false;
-                event
-                    .start
-                    .as_ref()
-                    .and_then(|start| match start {
-                        BedrockContentBlockStart::ToolUse(tool_use) => Some(
-                            ContentBlock::tool_use_builder()
-                                .id(tool_use.tool_use_id().to_string())
-                                .name(tool_use.name().to_string())
-                                .build(),
-                        ),
-                        _ => None,
-                    })
-                    .map(|content_block| {
-                        vec![(
-                            "content_block_start",
-                            Event::content_block_start_builder()
-                                .content_block(content_block)
-                                .index(event.content_block_index)
-                                .build(),
-                        )]
-                    })
+                let mut events = self.flush_pending_content_block_stop();
+                if let Some(content_block) = event.start.as_ref().and_then(|start| match start {
+                    BedrockContentBlockStart::ToolUse(tool_use) => Some(
+                        ContentBlock::tool_use_builder()
+                            .id(tool_use.tool_use_id().to_string())
+                            .name(tool_use.name().to_string())
+                            .build(),
+                    ),
+                    _ => None,
+                }) {
+                    events.push((
+                        "content_block_start",
+                        Event::content_block_start_builder()
+                            .content_block(content_block)
+                            .index(event.content_block_index)
+                            .build(),
+                    ));
+                }
+                if events.is_empty() { None } else { Some(events) }
             }
             ConverseStreamOutput::ContentBlockDelta(event) => {
-                let delta = event
+                let mut events = self.flush_pending_content_block_stop();
+
+                let Some(delta) = event
                     .delta
                     .as_ref()
-                    .and_then(convert_bedrock_content_block_delta)?;
-
-                let mut events = vec![];
+                    .and_then(convert_bedrock_content_block_delta)
+                else {
+                    return if events.is_empty() { None } else { Some(events) };
+                };
 
                 if self.previous_converse_stream_output_type_is_message_start_or_content_block_stop
                     && let Some(content_block) = match &delta {
@@ -134,7 +153,7 @@ impl EventConverter {
                 if let ContentBlockDelta::InputJsonDelta { partial_json } = &delta
                     && partial_json.is_empty()
                 {
-                    return None;
+                    return if events.is_empty() { None } else { Some(events) };
                 }
 
                 events.push((
@@ -150,12 +169,12 @@ impl EventConverter {
             ConverseStreamOutput::ContentBlockStop(event) => {
                 self.previous_converse_stream_output_type_is_message_start_or_content_block_stop =
                     true;
-                Some(vec![(
-                    "content_block_stop",
-                    Event::content_block_stop_builder()
-                        .index(event.content_block_index)
-                        .build(),
-                )])
+                // Flush an earlier block's deferred stop (multi-block streams),
+                // then defer this one until `MessageStop` tells us whether a
+                // stop sequence was matched.
+                let events = self.flush_pending_content_block_stop();
+                self.pending_content_block_stop = Some(event.content_block_index);
+                if events.is_empty() { None } else { Some(events) }
             }
             ConverseStreamOutput::MessageStop(event) => {
                 self.stop_reason = match event.stop_reason {
@@ -167,16 +186,38 @@ impl EventConverter {
                 };
                 // Bedrock reports that a stop sequence was hit but not which one,
                 // and strips it from the output text. When the request configured
-                // exactly one stop sequence the match is unambiguous, so echo it
-                // back to the client (matching the native Anthropic API). With
-                // multiple configured sequences we cannot disambiguate, so leave
-                // it unset.
+                // exactly one stop sequence the match is unambiguous, so recover
+                // it for both the terminating `message_delta` and the injected
+                // trailing text delta below.
                 if event.stop_reason == StopReason::StopSequence
                     && let Some([only]) = self.request_stop_sequences.as_deref()
                 {
                     self.stop_sequence = Some(only.clone());
                 }
-                None
+                // Close the open content block. If a stop sequence matched, inject
+                // it as a trailing text delta *before* the deferred
+                // `content_block_stop` so streaming consumers that finalize the
+                // block at `content_block_stop` still see the closing text — the
+                // sequence Bedrock stripped from the body. (Native Anthropic
+                // reports the sequence only in `message_delta`; we additionally
+                // surface it inline for parsers that don't read that frame.)
+                let mut events = vec![];
+                if let Some(index) = self.pending_content_block_stop.take() {
+                    if let Some(seq) = &self.stop_sequence {
+                        events.push((
+                            "content_block_delta",
+                            Event::content_block_delta_builder()
+                                .delta(ContentBlockDelta::TextDelta { text: seq.clone() })
+                                .index(index)
+                                .build(),
+                        ));
+                    }
+                    events.push((
+                        "content_block_stop",
+                        Event::content_block_stop_builder().index(index).build(),
+                    ));
+                }
+                if events.is_empty() { None } else { Some(events) }
             }
             ConverseStreamOutput::Metadata(event) => {
                 if let Some(ref usage) = event.usage {
@@ -184,40 +225,32 @@ impl EventConverter {
                 }
                 self.terminated = true;
 
-                Some(vec![
-                    (
-                        "message_delta",
-                        Event::message_delta_builder()
-                            .delta(MessageDeltaContent {
-                                stop_reason: self.stop_reason.clone(),
-                                stop_sequence: self.stop_sequence.clone(),
-                            })
-                            .usage(
-                                UsageDelta::builder()
-                                    .input_tokens(
-                                        event.usage.as_ref().map_or(0, |u| u.input_tokens),
-                                    )
-                                    .output_tokens(
-                                        event.usage.as_ref().map_or(0, |u| u.output_tokens),
-                                    )
-                                    .cache_creation_input_tokens(
-                                        event
-                                            .usage
-                                            .as_ref()
-                                            .and_then(|u| u.cache_write_input_tokens),
-                                    )
-                                    .cache_read_input_tokens(
-                                        event
-                                            .usage
-                                            .as_ref()
-                                            .and_then(|u| u.cache_read_input_tokens),
-                                    )
-                                    .build(),
-                            )
-                            .build(),
-                    ),
-                    ("message_stop", Event::message_stop()),
-                ])
+                let mut events = self.flush_pending_content_block_stop();
+                events.push((
+                    "message_delta",
+                    Event::message_delta_builder()
+                        .delta(MessageDeltaContent {
+                            stop_reason: self.stop_reason.clone(),
+                            stop_sequence: self.stop_sequence.clone(),
+                        })
+                        .usage(
+                            UsageDelta::builder()
+                                .input_tokens(event.usage.as_ref().map_or(0, |u| u.input_tokens))
+                                .output_tokens(
+                                    event.usage.as_ref().map_or(0, |u| u.output_tokens),
+                                )
+                                .cache_creation_input_tokens(
+                                    event.usage.as_ref().and_then(|u| u.cache_write_input_tokens),
+                                )
+                                .cache_read_input_tokens(
+                                    event.usage.as_ref().and_then(|u| u.cache_read_input_tokens),
+                                )
+                                .build(),
+                        )
+                        .build(),
+                ));
+                events.push(("message_stop", Event::message_stop()));
+                Some(events)
             }
             _ => None,
         }
@@ -237,19 +270,19 @@ impl EventConverter {
             return None;
         }
         self.terminated = true;
-        Some(vec![
-            (
-                "message_delta",
-                Event::message_delta_builder()
-                    .delta(MessageDeltaContent {
-                        stop_reason: self.stop_reason.clone(),
-                        stop_sequence: self.stop_sequence.clone(),
-                    })
-                    .usage(UsageDelta::builder().build())
-                    .build(),
-            ),
-            ("message_stop", Event::message_stop()),
-        ])
+        let mut events = self.flush_pending_content_block_stop();
+        events.push((
+            "message_delta",
+            Event::message_delta_builder()
+                .delta(MessageDeltaContent {
+                    stop_reason: self.stop_reason.clone(),
+                    stop_sequence: self.stop_sequence.clone(),
+                })
+                .usage(UsageDelta::builder().build())
+                .build(),
+        ));
+        events.push(("message_stop", Event::message_stop()));
+        Some(events)
     }
 }
 
@@ -257,7 +290,9 @@ impl EventConverter {
 mod tests {
     use super::*;
     use aws_sdk_bedrockruntime::types::{
-        ConversationRole, ConverseStreamMetadataEvent, MessageStartEvent, MessageStopEvent,
+        ContentBlockDelta as BedrockContentBlockDelta, ContentBlockDeltaEvent,
+        ContentBlockStopEvent, ConversationRole, ConverseStreamMetadataEvent, MessageStartEvent,
+        MessageStopEvent,
     };
 
     fn converter() -> EventConverter {
@@ -282,6 +317,25 @@ mod tests {
         ConverseStreamOutput::MessageStop(
             MessageStopEvent::builder()
                 .stop_reason(stop_reason)
+                .build()
+                .unwrap(),
+        )
+    }
+
+    fn content_block_delta_text(text: &str) -> ConverseStreamOutput {
+        ConverseStreamOutput::ContentBlockDelta(
+            ContentBlockDeltaEvent::builder()
+                .delta(BedrockContentBlockDelta::Text(text.to_string()))
+                .content_block_index(0)
+                .build()
+                .unwrap(),
+        )
+    }
+
+    fn content_block_stop() -> ConverseStreamOutput {
+        ConverseStreamOutput::ContentBlockStop(
+            ContentBlockStopEvent::builder()
+                .content_block_index(0)
                 .build()
                 .unwrap(),
         )
@@ -405,5 +459,82 @@ mod tests {
         let json = serde_json::to_value(delta).unwrap();
         assert_eq!(json["delta"]["stop_reason"], "end_turn");
         assert!(json["delta"]["stop_sequence"].is_null());
+    }
+
+    #[test]
+    fn content_block_stop_is_deferred_until_message_stop() {
+        let mut conv = converter_with_stop_sequences(vec!["</block>".to_string()]);
+        let _ = conv.convert(&message_start());
+        let _ = conv.convert(&content_block_delta_text("<block>no"));
+        // The stop is buffered, not emitted yet.
+        assert!(conv.convert(&content_block_stop()).is_none());
+    }
+
+    #[test]
+    fn injects_matched_stop_sequence_as_text_delta_before_content_block_stop() {
+        let mut conv = converter_with_stop_sequences(vec!["</block>".to_string()]);
+        let _ = conv.convert(&message_start());
+        let _ = conv.convert(&content_block_delta_text("<block>no"));
+        let _ = conv.convert(&content_block_stop());
+
+        let events = conv
+            .convert(&message_stop_with(StopReason::StopSequence))
+            .expect("message_stop should flush injected delta + content_block_stop");
+
+        let names: Vec<_> = events.iter().map(|(n, _)| *n).collect();
+        assert_eq!(names, vec!["content_block_delta", "content_block_stop"]);
+
+        let (_, injected) = &events[0];
+        let json = serde_json::to_value(injected).unwrap();
+        assert_eq!(json["type"], "content_block_delta");
+        assert_eq!(json["delta"]["type"], "text_delta");
+        assert_eq!(json["delta"]["text"], "</block>");
+        assert_eq!(json["index"], 0);
+    }
+
+    #[test]
+    fn closes_block_without_injection_when_not_stop_sequence() {
+        let mut conv = converter_with_stop_sequences(vec!["</block>".to_string()]);
+        let _ = conv.convert(&message_start());
+        let _ = conv.convert(&content_block_delta_text("hi"));
+        let _ = conv.convert(&content_block_stop());
+
+        let events = conv
+            .convert(&message_stop_with(StopReason::EndTurn))
+            .expect("buffered content_block_stop should still be emitted");
+
+        let names: Vec<_> = events.iter().map(|(n, _)| *n).collect();
+        assert_eq!(names, vec!["content_block_stop"]);
+    }
+
+    #[test]
+    fn full_stream_orders_injected_close_before_stop_and_delta() {
+        let mut conv = converter_with_stop_sequences(vec!["</block>".to_string()]);
+        let mut names = vec![];
+        for out in [
+            message_start(),
+            content_block_delta_text("<block>no"),
+            content_block_stop(),
+            message_stop_with(StopReason::StopSequence),
+            metadata(),
+        ] {
+            if let Some(events) = conv.convert(&out) {
+                names.extend(events.into_iter().map(|(n, _)| n));
+            }
+        }
+        // The injected "</block>" delta lands after the body delta and before
+        // the block closes; the message_delta (carrying stop_sequence) follows.
+        assert_eq!(
+            names,
+            vec![
+                "message_start",
+                "content_block_start",
+                "content_block_delta", // "<block>no"
+                "content_block_delta", // injected "</block>"
+                "content_block_stop",
+                "message_delta",
+                "message_stop",
+            ]
+        );
     }
 }
