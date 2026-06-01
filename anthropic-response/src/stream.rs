@@ -15,6 +15,14 @@ pub struct EventConverter {
     model: String,
     previous_converse_stream_output_type_is_message_start_or_content_block_stop: bool,
     stop_reason: Option<String>,
+    /// The stop sequence reported back to the client in the terminating
+    /// `message_delta`. Bedrock strips the matched sequence from the output text
+    /// and does not report *which* sequence matched, so we recover it from the
+    /// request's configured `stop_sequences` when the stream stops on one.
+    stop_sequence: Option<String>,
+    /// The `stop_sequences` configured on the originating request, used to
+    /// reconstruct the matched sequence (see `stop_sequence`).
+    request_stop_sequences: Option<Vec<String>>,
     started: bool,
     terminated: bool,
     usage_callback: Arc<dyn Fn(&TokenUsage) + Send + Sync>,
@@ -24,6 +32,7 @@ impl EventConverter {
     pub fn new(
         message_id: String,
         model: String,
+        request_stop_sequences: Option<Vec<String>>,
         usage_callback: Arc<dyn Fn(&TokenUsage) + Send + Sync>,
     ) -> Self {
         Self {
@@ -31,6 +40,8 @@ impl EventConverter {
             model,
             previous_converse_stream_output_type_is_message_start_or_content_block_stop: false,
             stop_reason: None,
+            stop_sequence: None,
+            request_stop_sequences,
             started: false,
             terminated: false,
             usage_callback,
@@ -154,6 +165,17 @@ impl EventConverter {
                     StopReason::ToolUse => Some("tool_use".to_string()),
                     _ => None,
                 };
+                // Bedrock reports that a stop sequence was hit but not which one,
+                // and strips it from the output text. When the request configured
+                // exactly one stop sequence the match is unambiguous, so echo it
+                // back to the client (matching the native Anthropic API). With
+                // multiple configured sequences we cannot disambiguate, so leave
+                // it unset.
+                if event.stop_reason == StopReason::StopSequence
+                    && let Some([only]) = self.request_stop_sequences.as_deref()
+                {
+                    self.stop_sequence = Some(only.clone());
+                }
                 None
             }
             ConverseStreamOutput::Metadata(event) => {
@@ -168,7 +190,7 @@ impl EventConverter {
                         Event::message_delta_builder()
                             .delta(MessageDeltaContent {
                                 stop_reason: self.stop_reason.clone(),
-                                stop_sequence: None,
+                                stop_sequence: self.stop_sequence.clone(),
                             })
                             .usage(
                                 UsageDelta::builder()
@@ -221,7 +243,7 @@ impl EventConverter {
                 Event::message_delta_builder()
                     .delta(MessageDeltaContent {
                         stop_reason: self.stop_reason.clone(),
-                        stop_sequence: None,
+                        stop_sequence: self.stop_sequence.clone(),
                     })
                     .usage(UsageDelta::builder().build())
                     .build(),
@@ -242,7 +264,26 @@ mod tests {
         EventConverter::new(
             "msg_test".to_string(),
             "model_test".to_string(),
+            None,
             Arc::new(|_| {}),
+        )
+    }
+
+    fn converter_with_stop_sequences(stop_sequences: Vec<String>) -> EventConverter {
+        EventConverter::new(
+            "msg_test".to_string(),
+            "model_test".to_string(),
+            Some(stop_sequences),
+            Arc::new(|_| {}),
+        )
+    }
+
+    fn message_stop_with(stop_reason: StopReason) -> ConverseStreamOutput {
+        ConverseStreamOutput::MessageStop(
+            MessageStopEvent::builder()
+                .stop_reason(stop_reason)
+                .build()
+                .unwrap(),
         )
     }
 
@@ -310,5 +351,59 @@ mod tests {
 
         assert!(conv.finalize().is_some());
         assert!(conv.finalize().is_none());
+    }
+
+    #[test]
+    fn metadata_emits_matched_stop_sequence_when_single_configured() {
+        let mut conv = converter_with_stop_sequences(vec!["</block>".to_string()]);
+        let _ = conv.convert(&message_start());
+        let _ = conv.convert(&message_stop_with(StopReason::StopSequence));
+        let events = conv.convert(&metadata()).expect("metadata emits events");
+
+        let (_, delta) = &events[0];
+        let json = serde_json::to_value(delta).unwrap();
+        assert_eq!(json["delta"]["stop_reason"], "stop_sequence");
+        assert_eq!(json["delta"]["stop_sequence"], "</block>");
+    }
+
+    #[test]
+    fn finalize_emits_matched_stop_sequence_when_single_configured() {
+        let mut conv = converter_with_stop_sequences(vec!["</block>".to_string()]);
+        let _ = conv.convert(&message_start());
+        let _ = conv.convert(&message_stop_with(StopReason::StopSequence));
+        let events = conv.finalize().expect("finalize emits a terminator");
+
+        let (_, delta) = &events[0];
+        let json = serde_json::to_value(delta).unwrap();
+        assert_eq!(json["delta"]["stop_reason"], "stop_sequence");
+        assert_eq!(json["delta"]["stop_sequence"], "</block>");
+    }
+
+    #[test]
+    fn stop_sequence_omitted_when_multiple_configured() {
+        let mut conv =
+            converter_with_stop_sequences(vec!["</block>".to_string(), "STOP".to_string()]);
+        let _ = conv.convert(&message_start());
+        let _ = conv.convert(&message_stop_with(StopReason::StopSequence));
+        let events = conv.convert(&metadata()).expect("metadata emits events");
+
+        let (_, delta) = &events[0];
+        let json = serde_json::to_value(delta).unwrap();
+        assert_eq!(json["delta"]["stop_reason"], "stop_sequence");
+        // Ambiguous which sequence matched, so it is left unset.
+        assert!(json["delta"]["stop_sequence"].is_null());
+    }
+
+    #[test]
+    fn stop_sequence_omitted_when_stop_reason_is_not_stop_sequence() {
+        let mut conv = converter_with_stop_sequences(vec!["</block>".to_string()]);
+        let _ = conv.convert(&message_start());
+        let _ = conv.convert(&message_stop_with(StopReason::EndTurn));
+        let events = conv.convert(&metadata()).expect("metadata emits events");
+
+        let (_, delta) = &events[0];
+        let json = serde_json::to_value(delta).unwrap();
+        assert_eq!(json["delta"]["stop_reason"], "end_turn");
+        assert!(json["delta"]["stop_sequence"].is_null());
     }
 }
