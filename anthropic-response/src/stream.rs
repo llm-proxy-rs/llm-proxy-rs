@@ -54,16 +54,16 @@ impl EventConverter {
         }
     }
 
-    /// Emits any buffered `content_block_stop` and clears it. Returns an empty
-    /// vec when nothing is pending so callers can freely prepend the result.
-    fn flush_pending_content_block_stop(&mut self) -> Vec<(&'static str, Event)> {
-        match self.pending_content_block_stop.take() {
-            Some(index) => vec![(
+    /// Takes the deferred `content_block_stop`, if any. Bedrock closes one block
+    /// before opening the next, so at most one stop is ever buffered — hence an
+    /// `Option`, not a list.
+    fn flush_pending_content_block_stop(&mut self) -> Option<(&'static str, Event)> {
+        self.pending_content_block_stop.take().map(|index| {
+            (
                 "content_block_stop",
                 Event::content_block_stop_builder().index(index).build(),
-            )],
-            None => vec![],
-        }
+            )
+        })
     }
 
     pub fn convert(
@@ -92,7 +92,11 @@ impl EventConverter {
             ConverseStreamOutput::ContentBlockStart(event) => {
                 self.previous_converse_stream_output_type_is_message_start_or_content_block_stop =
                     false;
-                let mut events = self.flush_pending_content_block_stop();
+                let mut events = Vec::new();
+                // Multi-block streams: Bedrock opens the next block (e.g. tool_use)
+                // while the previous block's `content_block_stop` is still deferred.
+                // Close that block before emitting this `content_block_start`.
+                events.extend(self.flush_pending_content_block_stop());
                 if let Some(content_block) = event.start.as_ref().and_then(|start| match start {
                     BedrockContentBlockStart::ToolUse(tool_use) => Some(
                         ContentBlock::tool_use_builder()
@@ -110,17 +114,29 @@ impl EventConverter {
                             .build(),
                     ));
                 }
-                if events.is_empty() { None } else { Some(events) }
+                if events.is_empty() {
+                    None
+                } else {
+                    Some(events)
+                }
             }
             ConverseStreamOutput::ContentBlockDelta(event) => {
-                let mut events = self.flush_pending_content_block_stop();
+                let mut events = Vec::new();
+                // Same as `ContentBlockStart`: the prior block's stop may still be
+                // buffered when deltas for the next block arrive (Bedrock often skips
+                // an explicit start and sends a delta instead).
+                events.extend(self.flush_pending_content_block_stop());
 
                 let Some(delta) = event
                     .delta
                     .as_ref()
                     .and_then(convert_bedrock_content_block_delta)
                 else {
-                    return if events.is_empty() { None } else { Some(events) };
+                    return if events.is_empty() {
+                        None
+                    } else {
+                        Some(events)
+                    };
                 };
 
                 if self.previous_converse_stream_output_type_is_message_start_or_content_block_stop
@@ -153,7 +169,11 @@ impl EventConverter {
                 if let ContentBlockDelta::InputJsonDelta { partial_json } = &delta
                     && partial_json.is_empty()
                 {
-                    return if events.is_empty() { None } else { Some(events) };
+                    return if events.is_empty() {
+                        None
+                    } else {
+                        Some(events)
+                    };
                 }
 
                 events.push((
@@ -169,12 +189,13 @@ impl EventConverter {
             ConverseStreamOutput::ContentBlockStop(event) => {
                 self.previous_converse_stream_output_type_is_message_start_or_content_block_stop =
                     true;
-                // Flush an earlier block's deferred stop (multi-block streams),
-                // then defer this one until `MessageStop` tells us whether a
-                // stop sequence was matched.
-                let events = self.flush_pending_content_block_stop();
+                // Defer this stop until `MessageStop` tells us whether to inject a
+                // matched stop sequence as a trailing text delta first. No earlier
+                // stop can still be pending here: Bedrock always sends a
+                // `ContentBlockStart`/`ContentBlockDelta` between blocks, and both
+                // flush the buffer.
                 self.pending_content_block_stop = Some(event.content_block_index);
-                if events.is_empty() { None } else { Some(events) }
+                None
             }
             ConverseStreamOutput::MessageStop(event) => {
                 self.stop_reason = match event.stop_reason {
@@ -217,7 +238,11 @@ impl EventConverter {
                         Event::content_block_stop_builder().index(index).build(),
                     ));
                 }
-                if events.is_empty() { None } else { Some(events) }
+                if events.is_empty() {
+                    None
+                } else {
+                    Some(events)
+                }
             }
             ConverseStreamOutput::Metadata(event) => {
                 if let Some(ref usage) = event.usage {
@@ -225,32 +250,42 @@ impl EventConverter {
                 }
                 self.terminated = true;
 
-                let mut events = self.flush_pending_content_block_stop();
-                events.push((
-                    "message_delta",
-                    Event::message_delta_builder()
-                        .delta(MessageDeltaContent {
-                            stop_reason: self.stop_reason.clone(),
-                            stop_sequence: self.stop_sequence.clone(),
-                        })
-                        .usage(
-                            UsageDelta::builder()
-                                .input_tokens(event.usage.as_ref().map_or(0, |u| u.input_tokens))
-                                .output_tokens(
-                                    event.usage.as_ref().map_or(0, |u| u.output_tokens),
-                                )
-                                .cache_creation_input_tokens(
-                                    event.usage.as_ref().and_then(|u| u.cache_write_input_tokens),
-                                )
-                                .cache_read_input_tokens(
-                                    event.usage.as_ref().and_then(|u| u.cache_read_input_tokens),
-                                )
-                                .build(),
-                        )
-                        .build(),
-                ));
-                events.push(("message_stop", Event::message_stop()));
-                Some(events)
+                // No `content_block_stop` can be pending: `MessageStop` always
+                // precedes `Metadata` and flushes it.
+                Some(vec![
+                    (
+                        "message_delta",
+                        Event::message_delta_builder()
+                            .delta(MessageDeltaContent {
+                                stop_reason: self.stop_reason.clone(),
+                                stop_sequence: self.stop_sequence.clone(),
+                            })
+                            .usage(
+                                UsageDelta::builder()
+                                    .input_tokens(
+                                        event.usage.as_ref().map_or(0, |u| u.input_tokens),
+                                    )
+                                    .output_tokens(
+                                        event.usage.as_ref().map_or(0, |u| u.output_tokens),
+                                    )
+                                    .cache_creation_input_tokens(
+                                        event
+                                            .usage
+                                            .as_ref()
+                                            .and_then(|u| u.cache_write_input_tokens),
+                                    )
+                                    .cache_read_input_tokens(
+                                        event
+                                            .usage
+                                            .as_ref()
+                                            .and_then(|u| u.cache_read_input_tokens),
+                                    )
+                                    .build(),
+                            )
+                            .build(),
+                    ),
+                    ("message_stop", Event::message_stop()),
+                ])
             }
             _ => None,
         }
@@ -270,7 +305,10 @@ impl EventConverter {
             return None;
         }
         self.terminated = true;
-        let mut events = self.flush_pending_content_block_stop();
+        let mut events = Vec::new();
+        // Truncated tail: `Metadata` never arrived, so `MessageStop` may not have
+        // flushed the deferred stop either. Emit it before the synthetic terminator.
+        events.extend(self.flush_pending_content_block_stop());
         events.push((
             "message_delta",
             Event::message_delta_builder()
