@@ -1,19 +1,22 @@
 use aws_sdk_bedrockruntime::types::{ContentBlock as BedrockContentBlock, StopReason, TokenUsage};
 use serde::{Deserialize, Serialize};
 
-use crate::{bedrock_content_blocks_to_json, event::ContentBlock};
+use crate::{
+    bedrock_content_blocks_to_json, event::ContentBlock, stop_reason::recover_stop_sequence,
+};
 
 pub fn converse_output_to_message(
     id: String,
     model: String,
     content_blocks: &[BedrockContentBlock],
-    stop_reason: &StopReason,
+    bedrock_stop_reason: &StopReason,
     usage: Option<&TokenUsage>,
     request_stop_sequences: Option<&[String]>,
 ) -> Result<Message, serde_json::Error> {
     let mut content = bedrock_content_blocks_to_json(content_blocks)?;
 
-    let (stop_reason, stop_sequence) = map_stop_reason(stop_reason, request_stop_sequences);
+    let stop_reason = bedrock_stop_reason.as_str().to_string().into();
+    let stop_sequence = recover_stop_sequence(bedrock_stop_reason, request_stop_sequences);
 
     if let Some(seq) = &stop_sequence {
         append_stop_sequence_to_content(&mut content, seq)?;
@@ -38,25 +41,6 @@ fn usage_from_token_usage(usage: Option<&TokenUsage>) -> Usage {
         .cache_creation_input_tokens(usage.and_then(|u| u.cache_write_input_tokens))
         .cache_read_input_tokens(usage.and_then(|u| u.cache_read_input_tokens))
         .build()
-}
-
-fn map_stop_reason(
-    stop_reason: &StopReason,
-    request_stop_sequences: Option<&[String]>,
-) -> (Option<String>, Option<String>) {
-    match stop_reason {
-        StopReason::EndTurn => (Some("end_turn".to_string()), None),
-        StopReason::MaxTokens => (Some("max_tokens".to_string()), None),
-        StopReason::ToolUse => (Some("tool_use".to_string()), None),
-        StopReason::StopSequence => {
-            let matched = match request_stop_sequences {
-                Some([only]) => Some(only.clone()),
-                _ => None,
-            };
-            (Some("stop_sequence".to_string()), matched)
-        }
-        _ => (None, None),
-    }
 }
 
 fn append_stop_sequence_to_content(

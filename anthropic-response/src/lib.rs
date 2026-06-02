@@ -4,6 +4,7 @@ pub mod content_block;
 pub mod content_block_delta;
 pub mod event;
 pub mod message;
+mod stop_reason;
 mod stream;
 
 pub use content_block::*;

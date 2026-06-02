@@ -1,5 +1,5 @@
 use aws_sdk_bedrockruntime::types::{
-    ContentBlockStart as BedrockContentBlockStart, ConverseStreamOutput, StopReason, TokenUsage,
+    ContentBlockStart as BedrockContentBlockStart, ConverseStreamOutput, TokenUsage,
 };
 use std::sync::Arc;
 
@@ -8,6 +8,7 @@ use crate::{
     convert_bedrock_content_block_delta,
     event::{ContentBlock, Event, MessageDeltaContent, UsageDelta},
     message::Message,
+    stop_reason::recover_stop_sequence,
 };
 
 pub struct EventConverter {
@@ -193,23 +194,11 @@ impl EventConverter {
                 }
             }
             ConverseStreamOutput::MessageStop(event) => {
-                self.stop_reason = match event.stop_reason {
-                    StopReason::EndTurn => Some("end_turn".to_string()),
-                    StopReason::MaxTokens => Some("max_tokens".to_string()),
-                    StopReason::StopSequence => Some("stop_sequence".to_string()),
-                    StopReason::ToolUse => Some("tool_use".to_string()),
-                    _ => None,
-                };
-                // Bedrock reports that a stop sequence was hit but not which one,
-                // and strips it from the output text. When the request configured
-                // exactly one stop sequence the match is unambiguous, so recover
-                // it for both the terminating `message_delta` and the injected
-                // trailing text delta below.
-                if event.stop_reason == StopReason::StopSequence
-                    && let Some([only]) = self.request_stop_sequences.as_deref()
-                {
-                    self.stop_sequence = Some(only.clone());
-                }
+                self.stop_reason = event.stop_reason.as_str().to_string().into();
+                self.stop_sequence = recover_stop_sequence(
+                    &event.stop_reason,
+                    self.request_stop_sequences.as_deref(),
+                );
                 // Close the open content block. If a stop sequence matched, inject
                 // it as a trailing text delta *before* the deferred
                 // `content_block_stop` so streaming consumers that finalize the
@@ -313,7 +302,7 @@ mod tests {
     use aws_sdk_bedrockruntime::types::{
         ContentBlockDelta as BedrockContentBlockDelta, ContentBlockDeltaEvent,
         ContentBlockStopEvent, ConversationRole, ConverseStreamMetadataEvent, MessageStartEvent,
-        MessageStopEvent,
+        MessageStopEvent, StopReason,
     };
 
     fn converter() -> EventConverter {
