@@ -8,7 +8,7 @@ use crate::{
     convert_bedrock_content_block_delta,
     event::{ContentBlock, Event, MessageDeltaContent, UsageDelta},
     message::Message,
-    stop_reason::recover_stop_sequence,
+    stop_reason::get_stop_sequence,
 };
 
 pub struct EventConverter {
@@ -195,10 +195,8 @@ impl EventConverter {
             }
             ConverseStreamOutput::MessageStop(event) => {
                 self.stop_reason = event.stop_reason.as_str().to_string().into();
-                self.stop_sequence = recover_stop_sequence(
-                    &event.stop_reason,
-                    self.request_stop_sequences.as_deref(),
-                );
+                self.stop_sequence =
+                    get_stop_sequence(&event.stop_reason, self.request_stop_sequences.as_deref());
                 // Close the open content block. If a stop sequence matched, inject
                 // it as a trailing text delta *before* the deferred
                 // `content_block_stop` so streaming consumers that finalize the

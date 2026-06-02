@@ -2,7 +2,7 @@ use aws_sdk_bedrockruntime::types::StopReason;
 
 /// Recovers Bedrock's omitted matched stop sequence when exactly one sequence
 /// was configured on the request.
-pub fn recover_stop_sequence(
+pub fn get_stop_sequence(
     stop_reason: &StopReason,
     request_stop_sequences: Option<&[String]>,
 ) -> Option<String> {

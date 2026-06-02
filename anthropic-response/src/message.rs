@@ -1,9 +1,7 @@
 use aws_sdk_bedrockruntime::types::{ContentBlock as BedrockContentBlock, StopReason, TokenUsage};
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    bedrock_content_blocks_to_json, event::ContentBlock, stop_reason::recover_stop_sequence,
-};
+use crate::{bedrock_content_blocks_to_json, event::ContentBlock, stop_reason::get_stop_sequence};
 
 pub fn converse_output_to_message(
     id: String,
@@ -16,7 +14,7 @@ pub fn converse_output_to_message(
     let mut content = bedrock_content_blocks_to_json(content_blocks)?;
 
     let stop_reason = bedrock_stop_reason.as_str().to_string().into();
-    let stop_sequence = recover_stop_sequence(bedrock_stop_reason, request_stop_sequences);
+    let stop_sequence = get_stop_sequence(bedrock_stop_reason, request_stop_sequences);
 
     if let Some(seq) = &stop_sequence {
         append_stop_sequence_to_content(&mut content, seq)?;
