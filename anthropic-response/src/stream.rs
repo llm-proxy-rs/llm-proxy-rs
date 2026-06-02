@@ -1,5 +1,5 @@
 use aws_sdk_bedrockruntime::types::{
-    ContentBlockStart as BedrockContentBlockStart, ConverseStreamOutput, StopReason, TokenUsage,
+    ContentBlockStart as BedrockContentBlockStart, ConverseStreamOutput, TokenUsage,
 };
 use std::sync::Arc;
 
@@ -8,6 +8,7 @@ use crate::{
     convert_bedrock_content_block_delta,
     event::{ContentBlock, Event, MessageDeltaContent, UsageDelta},
     message::Message,
+    stop_reason::get_stop_sequence,
 };
 
 pub struct EventConverter {
@@ -110,7 +111,11 @@ impl EventConverter {
                             .build(),
                     ));
                 }
-                if events.is_empty() { None } else { Some(events) }
+                if events.is_empty() {
+                    None
+                } else {
+                    Some(events)
+                }
             }
             ConverseStreamOutput::ContentBlockDelta(event) => {
                 let mut events = self.flush_pending_content_block_stop();
@@ -120,7 +125,11 @@ impl EventConverter {
                     .as_ref()
                     .and_then(convert_bedrock_content_block_delta)
                 else {
-                    return if events.is_empty() { None } else { Some(events) };
+                    return if events.is_empty() {
+                        None
+                    } else {
+                        Some(events)
+                    };
                 };
 
                 if self.previous_converse_stream_output_type_is_message_start_or_content_block_stop
@@ -153,7 +162,11 @@ impl EventConverter {
                 if let ContentBlockDelta::InputJsonDelta { partial_json } = &delta
                     && partial_json.is_empty()
                 {
-                    return if events.is_empty() { None } else { Some(events) };
+                    return if events.is_empty() {
+                        None
+                    } else {
+                        Some(events)
+                    };
                 }
 
                 events.push((
@@ -174,26 +187,16 @@ impl EventConverter {
                 // stop sequence was matched.
                 let events = self.flush_pending_content_block_stop();
                 self.pending_content_block_stop = Some(event.content_block_index);
-                if events.is_empty() { None } else { Some(events) }
+                if events.is_empty() {
+                    None
+                } else {
+                    Some(events)
+                }
             }
             ConverseStreamOutput::MessageStop(event) => {
-                self.stop_reason = match event.stop_reason {
-                    StopReason::EndTurn => Some("end_turn".to_string()),
-                    StopReason::MaxTokens => Some("max_tokens".to_string()),
-                    StopReason::StopSequence => Some("stop_sequence".to_string()),
-                    StopReason::ToolUse => Some("tool_use".to_string()),
-                    _ => None,
-                };
-                // Bedrock reports that a stop sequence was hit but not which one,
-                // and strips it from the output text. When the request configured
-                // exactly one stop sequence the match is unambiguous, so recover
-                // it for both the terminating `message_delta` and the injected
-                // trailing text delta below.
-                if event.stop_reason == StopReason::StopSequence
-                    && let Some([only]) = self.request_stop_sequences.as_deref()
-                {
-                    self.stop_sequence = Some(only.clone());
-                }
+                self.stop_reason = event.stop_reason.as_str().to_string().into();
+                self.stop_sequence =
+                    get_stop_sequence(&event.stop_reason, self.request_stop_sequences.as_deref());
                 // Close the open content block. If a stop sequence matched, inject
                 // it as a trailing text delta *before* the deferred
                 // `content_block_stop` so streaming consumers that finalize the
@@ -217,7 +220,11 @@ impl EventConverter {
                         Event::content_block_stop_builder().index(index).build(),
                     ));
                 }
-                if events.is_empty() { None } else { Some(events) }
+                if events.is_empty() {
+                    None
+                } else {
+                    Some(events)
+                }
             }
             ConverseStreamOutput::Metadata(event) => {
                 if let Some(ref usage) = event.usage {
@@ -236,11 +243,12 @@ impl EventConverter {
                         .usage(
                             UsageDelta::builder()
                                 .input_tokens(event.usage.as_ref().map_or(0, |u| u.input_tokens))
-                                .output_tokens(
-                                    event.usage.as_ref().map_or(0, |u| u.output_tokens),
-                                )
+                                .output_tokens(event.usage.as_ref().map_or(0, |u| u.output_tokens))
                                 .cache_creation_input_tokens(
-                                    event.usage.as_ref().and_then(|u| u.cache_write_input_tokens),
+                                    event
+                                        .usage
+                                        .as_ref()
+                                        .and_then(|u| u.cache_write_input_tokens),
                                 )
                                 .cache_read_input_tokens(
                                     event.usage.as_ref().and_then(|u| u.cache_read_input_tokens),
@@ -292,7 +300,7 @@ mod tests {
     use aws_sdk_bedrockruntime::types::{
         ContentBlockDelta as BedrockContentBlockDelta, ContentBlockDeltaEvent,
         ContentBlockStopEvent, ConversationRole, ConverseStreamMetadataEvent, MessageStartEvent,
-        MessageStopEvent,
+        MessageStopEvent, StopReason,
     };
 
     fn converter() -> EventConverter {

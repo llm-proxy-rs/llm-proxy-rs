@@ -1,7 +1,10 @@
 use anyhow::Error as AnyhowError;
 use aws_sdk_bedrockruntime::{
     error::SdkError,
-    operation::{converse_stream::ConverseStreamError, count_tokens::CountTokensError},
+    operation::{
+        converse::ConverseError, converse_stream::ConverseStreamError,
+        count_tokens::CountTokensError,
+    },
 };
 use axum::{http::StatusCode, response::IntoResponse};
 
@@ -24,6 +27,11 @@ where
             .and_then(|e| e.raw_response())
             .map(|r| r.status().as_u16())
             .or_else(|| {
+                err.downcast_ref::<SdkError<ConverseError>>()
+                    .and_then(|e| e.raw_response())
+                    .map(|r| r.status().as_u16())
+            })
+            .or_else(|| {
                 err.downcast_ref::<SdkError<CountTokensError>>()
                     .and_then(|e| e.raw_response())
                     .map(|r| r.status().as_u16())
@@ -34,6 +42,11 @@ where
             .downcast_ref::<SdkError<ConverseStreamError>>()
             .and_then(|e| e.as_service_error())
             .and_then(|se| se.meta().message())
+            .or_else(|| {
+                err.downcast_ref::<SdkError<ConverseError>>()
+                    .and_then(|e| e.as_service_error())
+                    .and_then(|se| se.meta().message())
+            })
             .or_else(|| {
                 err.downcast_ref::<SdkError<CountTokensError>>()
                     .and_then(|e| e.as_service_error())
