@@ -3,16 +3,18 @@ use anthropic_request::{
     V1MessagesCountTokensRequest, V1MessagesRequest, build_tool_configuration,
     get_additional_model_request_fields,
 };
-use anthropic_response::EventConverter;
+use anthropic_response::{
+    EventConverter, Message as V1MessagesResponse, converse_output_to_message,
+};
 use async_trait::async_trait;
 use aws_sdk_bedrockruntime::{
     Client,
     error::SdkError,
-    operation::converse_stream::ConverseStreamError,
+    operation::{converse::ConverseError, converse_stream::ConverseStreamError},
     primitives::event_stream::EventReceiver,
     types::{
-        ContentBlock, ConverseStreamOutput, ConverseTokensRequest, CountTokensInput,
-        Message as BedrockMessage, SystemContentBlock, TokenUsage,
+        ContentBlock, ConverseOutput, ConverseStreamOutput, ConverseTokensRequest,
+        CountTokensInput, Message as BedrockMessage, SystemContentBlock, TokenUsage,
         error::ConverseStreamOutputError,
     },
 };
@@ -186,6 +188,16 @@ pub trait V1MessagesProvider {
     where
         F: Fn(&TokenUsage) + Send + Sync + 'static;
 
+    async fn v1_messages<F>(
+        self,
+        request: V1MessagesRequest,
+        response_model_id: Option<String>,
+        anthropic_beta: Option<Vec<String>>,
+        usage_callback: F,
+    ) -> anyhow::Result<V1MessagesResponse>
+    where
+        F: Fn(&TokenUsage) + Send + Sync + 'static;
+
     async fn v1_messages_count_tokens(
         &self,
         request: &V1MessagesCountTokensRequest,
@@ -293,15 +305,19 @@ pub struct BedrockV1MessagesProvider {
     bedrockruntime_client: Client,
 }
 
-/// Returns true if this is the Bedrock "thinking block modified" validation error.
-fn is_thinking_block_modified_error(err: &SdkError<ConverseStreamError>) -> bool {
-    let Some(message) = err.as_service_error().and_then(|e| e.meta().message()) else {
-        return false;
-    };
+const THINKING_BLOCK_MODIFIED_MESSAGE: &str =
+    "`thinking` or `redacted_thinking` blocks in the latest assistant message cannot be modified";
 
-    message.contains(
-        "`thinking` or `redacted_thinking` blocks in the latest assistant message cannot be modified",
-    )
+fn is_thinking_block_modified_error(err: &SdkError<ConverseStreamError>) -> bool {
+    err.as_service_error()
+        .and_then(|e| e.meta().message())
+        .is_some_and(|m| m.contains(THINKING_BLOCK_MODIFIED_MESSAGE))
+}
+
+fn is_thinking_block_modified_converse_error(err: &SdkError<ConverseError>) -> bool {
+    err.as_service_error()
+        .and_then(|e| e.meta().message())
+        .is_some_and(|m| m.contains(THINKING_BLOCK_MODIFIED_MESSAGE))
 }
 
 impl BedrockV1MessagesProvider {
@@ -504,6 +520,74 @@ impl V1MessagesProvider for BedrockV1MessagesProvider {
         }
 
         Ok(ReceiverStream::new(event_rx).boxed())
+    }
+
+    async fn v1_messages<F>(
+        self,
+        request: V1MessagesRequest,
+        response_model_id: Option<String>,
+        anthropic_beta: Option<Vec<String>>,
+        usage_callback: F,
+    ) -> anyhow::Result<V1MessagesResponse>
+    where
+        F: Fn(&TokenUsage) + Send + Sync + 'static,
+    {
+        let model = response_model_id.unwrap_or(request.model.clone());
+        let stop_sequences = request.stop_sequences.clone();
+        log_v1_messages_request(&request);
+        let additional_model_request_fields = get_additional_model_request_fields(
+            request.thinking.as_ref(),
+            request.output_config.as_ref(),
+            anthropic_beta.as_deref(),
+            request.context_management.as_ref(),
+        );
+        let client = self.bedrockruntime_client;
+
+        let converse = |bcc: BedrockChatCompletion| {
+            client
+                .converse()
+                .model_id(bcc.model_id)
+                .set_system(bcc.system_content_blocks)
+                .set_messages(bcc.messages)
+                .set_tool_config(bcc.tool_config)
+                .set_inference_config(Some(bcc.inference_config))
+                .set_additional_model_request_fields(additional_model_request_fields.clone())
+                .set_output_config(bcc.output_config)
+                .send()
+        };
+
+        info!("Sending Anthropic request to Bedrock Converse API (non-streaming)");
+        let output = match converse(BedrockChatCompletion::try_from(&request)?).await {
+            Ok(output) => output,
+            Err(e) if is_thinking_block_modified_converse_error(&e) => {
+                info!("Thinking block was modified; retrying with prior thinking text blanked");
+                let mut retry_request = request;
+                retry_request.blank_assistant_thinking_text();
+                converse(BedrockChatCompletion::try_from(&retry_request)?).await?
+            }
+            Err(e) => {
+                error!("Bedrock Converse API error: {:?}", e);
+                return Err(e.into());
+            }
+        };
+
+        if let Some(usage) = output.usage() {
+            usage_callback(usage);
+        }
+
+        let content_blocks = match output.output() {
+            Some(ConverseOutput::Message(message)) => message.content(),
+            _ => &[],
+        };
+
+        Ok(converse_output_to_message(
+            format!("msg_{}", Uuid::new_v4()),
+            model,
+            content_blocks,
+            output.stop_reason(),
+            output.usage(),
+            stop_sequences.as_deref(),
+        )?)
     }
 
     async fn v1_messages_count_tokens(

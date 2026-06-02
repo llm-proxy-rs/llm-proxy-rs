@@ -110,7 +110,11 @@ impl EventConverter {
                             .build(),
                     ));
                 }
-                if events.is_empty() { None } else { Some(events) }
+                if events.is_empty() {
+                    None
+                } else {
+                    Some(events)
+                }
             }
             ConverseStreamOutput::ContentBlockDelta(event) => {
                 let mut events = self.flush_pending_content_block_stop();
@@ -120,7 +124,11 @@ impl EventConverter {
                     .as_ref()
                     .and_then(convert_bedrock_content_block_delta)
                 else {
-                    return if events.is_empty() { None } else { Some(events) };
+                    return if events.is_empty() {
+                        None
+                    } else {
+                        Some(events)
+                    };
                 };
 
                 if self.previous_converse_stream_output_type_is_message_start_or_content_block_stop
@@ -153,7 +161,11 @@ impl EventConverter {
                 if let ContentBlockDelta::InputJsonDelta { partial_json } = &delta
                     && partial_json.is_empty()
                 {
-                    return if events.is_empty() { None } else { Some(events) };
+                    return if events.is_empty() {
+                        None
+                    } else {
+                        Some(events)
+                    };
                 }
 
                 events.push((
@@ -174,7 +186,11 @@ impl EventConverter {
                 // stop sequence was matched.
                 let events = self.flush_pending_content_block_stop();
                 self.pending_content_block_stop = Some(event.content_block_index);
-                if events.is_empty() { None } else { Some(events) }
+                if events.is_empty() {
+                    None
+                } else {
+                    Some(events)
+                }
             }
             ConverseStreamOutput::MessageStop(event) => {
                 self.stop_reason = match event.stop_reason {
@@ -217,7 +233,11 @@ impl EventConverter {
                         Event::content_block_stop_builder().index(index).build(),
                     ));
                 }
-                if events.is_empty() { None } else { Some(events) }
+                if events.is_empty() {
+                    None
+                } else {
+                    Some(events)
+                }
             }
             ConverseStreamOutput::Metadata(event) => {
                 if let Some(ref usage) = event.usage {
@@ -236,11 +256,12 @@ impl EventConverter {
                         .usage(
                             UsageDelta::builder()
                                 .input_tokens(event.usage.as_ref().map_or(0, |u| u.input_tokens))
-                                .output_tokens(
-                                    event.usage.as_ref().map_or(0, |u| u.output_tokens),
-                                )
+                                .output_tokens(event.usage.as_ref().map_or(0, |u| u.output_tokens))
                                 .cache_creation_input_tokens(
-                                    event.usage.as_ref().and_then(|u| u.cache_write_input_tokens),
+                                    event
+                                        .usage
+                                        .as_ref()
+                                        .and_then(|u| u.cache_write_input_tokens),
                                 )
                                 .cache_read_input_tokens(
                                     event.usage.as_ref().and_then(|u| u.cache_read_input_tokens),

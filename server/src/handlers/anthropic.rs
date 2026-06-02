@@ -1,6 +1,5 @@
 use anthropic_request::{OutputConfig, V1MessagesCountTokensRequest, V1MessagesRequest};
 use anthropic_response::V1MessagesCountTokensResponse;
-use anyhow::anyhow;
 use axum::{
     Json,
     extract::State,
@@ -10,7 +9,7 @@ use axum::{
 use chat::provider::{BedrockV1MessagesProvider, V1MessagesProvider};
 use common::filter_anthropic_beta;
 use std::sync::Arc;
-use tracing::{error, info};
+use tracing::info;
 
 use crate::{AppState, error::AppError, utils::log_token_usage};
 
@@ -41,19 +40,22 @@ pub async fn handle_v1_messages(
         }
     }
 
-    if payload.stream == Some(false) {
-        error!("Stream is set to false");
-        return Err(anyhow!("Stream is set to false").into());
-    }
-
     let anthropic_beta = filter_anthropic_beta(&headers, &state.anthropic_beta_whitelist);
     info!("anthropic_beta: {:?}", anthropic_beta);
 
-    let stream = BedrockV1MessagesProvider::new(state.bedrockruntime_client.clone())
-        .v1_messages_stream(payload, None, anthropic_beta, log_token_usage)
-        .await?;
+    let provider = BedrockV1MessagesProvider::new(state.bedrockruntime_client.clone());
 
-    Ok((StatusCode::OK, Sse::new(stream)))
+    if payload.stream == Some(true) {
+        let stream = provider
+            .v1_messages_stream(payload, None, anthropic_beta, log_token_usage)
+            .await?;
+        return Ok((StatusCode::OK, Sse::new(stream)).into_response());
+    }
+
+    let message = provider
+        .v1_messages(payload, None, anthropic_beta, log_token_usage)
+        .await?;
+    Ok((StatusCode::OK, Json(message)).into_response())
 }
 
 pub async fn handle_v1_messages_count_tokens(

@@ -1656,3 +1656,92 @@ async fn v1_messages_context_window_exceeded_returns_http_400() {
         "expected non-empty body carrying the upstream Bedrock message"
     );
 }
+
+#[tokio::test]
+#[ignore]
+async fn v1_messages_non_stream_returns_json_message() {
+    let app = build_app().await;
+
+    let body = serde_json::json!({
+        "model": OPUS_4_8,
+        "max_tokens": 64,
+        "stream": false,
+        "messages": [
+            {"role": "user", "content": "Say hi in exactly one word."}
+        ]
+    });
+
+    let request = axum::http::Request::builder()
+        .method("POST")
+        .uri("/v1/messages")
+        .header("content-type", "application/json")
+        .body(Body::from(serde_json::to_vec(&body).unwrap()))
+        .unwrap();
+
+    let response = app.oneshot(request).await.unwrap();
+    assert_eq!(response.status(), 200);
+
+    let body_str = String::from_utf8(collect_body(response.into_body()).await).unwrap();
+    let message: serde_json::Value = serde_json::from_str(&body_str)
+        .unwrap_or_else(|e| panic!("expected JSON message, got {body_str}: {e}"));
+
+    assert_eq!(message["type"], "message", "body: {message}");
+    assert_eq!(message["role"], "assistant", "body: {message}");
+    assert!(
+        message["content"].as_array().is_some_and(|c| !c.is_empty()),
+        "expected non-empty content array, got: {message}"
+    );
+    assert!(
+        message["stop_reason"].is_string(),
+        "expected a stop_reason, got: {message}"
+    );
+    assert!(
+        message["usage"]["output_tokens"].as_i64().is_some(),
+        "expected usage.output_tokens, got: {message}"
+    );
+}
+
+#[tokio::test]
+#[ignore]
+async fn v1_messages_non_stream_echoes_matched_stop_sequence() {
+    let app = build_app().await;
+
+    let body = serde_json::json!({
+        "model": OPUS_4_8,
+        "max_tokens": 64,
+        "stream": false,
+        "stop_sequences": ["</answer>"],
+        "messages": [
+            {"role": "user", "content": "Reply with exactly this and nothing else: <answer>yes</answer>"}
+        ]
+    });
+
+    let request = axum::http::Request::builder()
+        .method("POST")
+        .uri("/v1/messages")
+        .header("content-type", "application/json")
+        .body(Body::from(serde_json::to_vec(&body).unwrap()))
+        .unwrap();
+
+    let response = app.oneshot(request).await.unwrap();
+    assert_eq!(response.status(), 200);
+
+    let body_str = String::from_utf8(collect_body(response.into_body()).await).unwrap();
+    let message: serde_json::Value = serde_json::from_str(&body_str)
+        .unwrap_or_else(|e| panic!("expected JSON message, got {body_str}: {e}"));
+
+    assert_eq!(message["stop_reason"], "stop_sequence", "body: {message}");
+    assert_eq!(message["stop_sequence"], "</answer>", "body: {message}");
+
+    let text: String = message["content"]
+        .as_array()
+        .unwrap_or_else(|| panic!("expected content array, got: {message}"))
+        .iter()
+        .filter(|block| block["type"] == "text")
+        .filter_map(|block| block["text"].as_str())
+        .collect();
+    assert!(
+        text.contains("</answer>"),
+        "content text missing re-injected stop sequence, got: {text:?} (body: {message})"
+    );
+}
