@@ -10,7 +10,7 @@ use async_trait::async_trait;
 use aws_sdk_bedrockruntime::{
     Client,
     error::SdkError,
-    operation::{converse::ConverseError, converse_stream::ConverseStreamError},
+    operation::converse_stream::ConverseStreamError,
     primitives::event_stream::EventReceiver,
     types::{
         ContentBlock, ConverseOutput, ConverseStreamOutput, ConverseTokensRequest,
@@ -19,6 +19,7 @@ use aws_sdk_bedrockruntime::{
     },
 };
 use aws_smithy_types::Document;
+use aws_smithy_types::error::metadata::ProvideErrorMetadata;
 use axum::response::sse::Event;
 use futures::stream::{BoxStream, StreamExt};
 use std::{sync::Arc, time::Duration};
@@ -308,13 +309,7 @@ pub struct BedrockV1MessagesProvider {
 const THINKING_BLOCK_MODIFIED_MESSAGE: &str =
     "`thinking` or `redacted_thinking` blocks in the latest assistant message cannot be modified";
 
-fn is_thinking_block_modified_error(err: &SdkError<ConverseStreamError>) -> bool {
-    err.as_service_error()
-        .and_then(|e| e.meta().message())
-        .is_some_and(|m| m.contains(THINKING_BLOCK_MODIFIED_MESSAGE))
-}
-
-fn is_thinking_block_modified_converse_error(err: &SdkError<ConverseError>) -> bool {
+fn is_thinking_block_modified_error<E: ProvideErrorMetadata>(err: &SdkError<E>) -> bool {
     err.as_service_error()
         .and_then(|e| e.meta().message())
         .is_some_and(|m| m.contains(THINKING_BLOCK_MODIFIED_MESSAGE))
@@ -559,7 +554,7 @@ impl V1MessagesProvider for BedrockV1MessagesProvider {
         info!("Sending Anthropic request to Bedrock Converse API (non-streaming)");
         let output = match converse(BedrockChatCompletion::try_from(&request)?).await {
             Ok(output) => output,
-            Err(e) if is_thinking_block_modified_converse_error(&e) => {
+            Err(e) if is_thinking_block_modified_error(&e) => {
                 info!("Thinking block was modified; retrying with prior thinking text blanked");
                 let mut retry_request = request;
                 retry_request.blank_assistant_thinking_text();
