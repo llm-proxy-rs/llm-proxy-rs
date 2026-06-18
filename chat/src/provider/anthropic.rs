@@ -314,7 +314,7 @@ type ConverseStreamSendFut = Pin<
     >,
 >;
 
-fn converse_stream_send_fut(
+fn send_converse_stream(
     client: &Client,
     bcc: BedrockChatCompletion,
     additional_model_request_fields: Option<Document>,
@@ -333,30 +333,31 @@ fn converse_stream_send_fut(
     )
 }
 
-enum ConverseStreamConnectOutcome {
-    Connected(Box<ConverseStreamSendOutput>),
-    SlowConnect(ConverseStreamSendFut),
+enum StreamConnect {
+    Ready(Box<ConverseStreamSendOutput>),
+    Pending(ConverseStreamSendFut),
 }
 
 /// Races `converse_stream`'s connect against the error window. Transient errors
 /// are already retried by the SDK's `standard` strategy before they surface
-/// here, so this only classifies the outcome: a fast connect, a fast error
-/// (becomes a 4xx via `AppError`), or a slow connect that falls to 200 + pings.
-async fn connect_converse_stream(
+/// here, so this only classifies the outcome: a fast connect (`Ready`), a fast
+/// error (becomes a 4xx via `AppError`), or a slow connect (`Pending`) that
+/// falls to a 200 SSE response with pings.
+async fn try_connect_stream(
     client: &Client,
     request: &V1MessagesRequest,
     additional_model_request_fields: Option<Document>,
-) -> anyhow::Result<ConverseStreamConnectOutcome> {
+) -> anyhow::Result<StreamConnect> {
     let bcc = BedrockChatCompletion::try_from(request)?;
-    let mut send_fut = converse_stream_send_fut(client, bcc, additional_model_request_fields);
+    let mut send_fut = send_converse_stream(client, bcc, additional_model_request_fields);
 
     match timeout(CONNECT_ERROR_WINDOW, &mut send_fut).await {
-        Ok(Ok(response)) => Ok(ConverseStreamConnectOutcome::Connected(Box::new(response))),
+        Ok(Ok(response)) => Ok(StreamConnect::Ready(Box::new(response))),
         Ok(Err(e)) => {
             error!("Bedrock API error: {e:?}");
             Err(e.into())
         }
-        Err(_) => Ok(ConverseStreamConnectOutcome::SlowConnect(send_fut)),
+        Err(_) => Ok(StreamConnect::Pending(send_fut)),
     }
 }
 
@@ -385,7 +386,7 @@ async fn converse(
         })
 }
 
-fn spawn_converse_stream_processor(
+fn spawn_stream_relay(
     stream: EventReceiver<ConverseStreamOutput, ConverseStreamOutputError>,
     model: String,
     stop_sequences: Option<Vec<String>>,
@@ -403,7 +404,7 @@ fn spawn_converse_stream_processor(
     ));
 }
 
-fn spawn_slow_connect_converse_stream(
+fn spawn_pending_stream_relay(
     mut send_fut: ConverseStreamSendFut,
     model: String,
     stop_sequences: Option<Vec<String>>,
@@ -499,10 +500,10 @@ impl V1MessagesProvider for BedrockV1MessagesProvider {
         // Race the connect against a short window: errors caught here flow
         // through `AppError` as proper HTTP 4xx with the upstream Bedrock
         // status. Slower connects fall to a 200 SSE response with pings.
-        match connect_converse_stream(client, &request, additional_model_request_fields).await? {
-            ConverseStreamConnectOutcome::Connected(response) => {
+        match try_connect_stream(client, &request, additional_model_request_fields).await? {
+            StreamConnect::Ready(response) => {
                 info!("Successfully connected to Bedrock stream for Anthropic format");
-                spawn_converse_stream_processor(
+                spawn_stream_relay(
                     response.stream,
                     model,
                     stop_sequences,
@@ -510,8 +511,8 @@ impl V1MessagesProvider for BedrockV1MessagesProvider {
                     event_tx,
                 );
             }
-            ConverseStreamConnectOutcome::SlowConnect(send_fut) => {
-                spawn_slow_connect_converse_stream(
+            StreamConnect::Pending(send_fut) => {
+                spawn_pending_stream_relay(
                     send_fut,
                     model,
                     stop_sequences,
