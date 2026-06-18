@@ -338,7 +338,6 @@ enum ConverseStreamConnectOutcome {
     SlowConnect(ConverseStreamSendFut),
 }
 
-/// Races `converse_stream` against the connect window, retrying transient errors
 /// Races `converse_stream`'s connect against the error window. Transient errors
 /// are already retried by the SDK's `standard` strategy before they surface
 /// here, so this only classifies the outcome: a fast connect, a fast error
