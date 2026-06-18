@@ -1,4 +1,5 @@
 use aws_config::BehaviorVersion;
+use aws_config::retry::RetryConfig;
 use aws_sdk_bedrockruntime::Client;
 use config::{Config, File};
 use server::{AppState, get_app};
@@ -55,7 +56,13 @@ async fn main() -> anyhow::Result<()> {
     let (host, port, inference_profile_prefixes, anthropic_beta_whitelist) = load_config().await?;
     info!("Starting server on {}:{}", host, port);
 
-    let aws_config = aws_config::load_defaults(BehaviorVersion::latest()).await;
+    // Retries are owned by the SDK's `standard` strategy: exponential backoff
+    // with jitter plus a client-side retry-quota token bucket. We only widen the
+    // attempt budget; the proxy adds no retry loop of its own.
+    let aws_config = aws_config::defaults(BehaviorVersion::latest())
+        .retry_config(RetryConfig::standard().with_max_attempts(5))
+        .load()
+        .await;
     let bedrockruntime_client = Client::new(&aws_config);
     info!("AWS Bedrock client initialized");
 

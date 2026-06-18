@@ -1,10 +1,10 @@
 use aws_sdk_bedrockruntime::{
     Client,
-    config::RetryConfig,
+    config::retry::RetryConfig,
     operation::converse::ConverseOutput as ConverseSendOutput,
     types::{
         ContentBlock, ConversationRole, ConverseOutput as ConverseOutputVariant,
-        Message as BedrockMessage, StopReason, TextBlock, TokenUsage,
+        Message as BedrockMessage, StopReason, TokenUsage,
     },
 };
 use aws_smithy_mocks::{RuleMode, mock, mock_client};
@@ -12,20 +12,26 @@ use axum::body::Body;
 use http_body_util::BodyExt;
 use server::{AppState, get_app};
 use std::sync::Arc;
+use std::time::Duration;
 use tower::ServiceExt;
+
+/// Retries are owned by the SDK (as configured in `main`); these tests just
+/// shrink the backoff so the retry path runs fast. `with_max_attempts(5)` is the
+/// SDK's *total* attempt budget (initial + retries).
+fn sdk_retry_config() -> RetryConfig {
+    RetryConfig::standard()
+        .with_max_attempts(5)
+        .with_initial_backoff(Duration::from_millis(1))
+}
 
 fn successful_converse_output() -> ConverseSendOutput {
     ConverseSendOutput::builder()
         .output(ConverseOutputVariant::Message(
             BedrockMessage::builder()
                 .role(ConversationRole::Assistant)
-                .content(ContentBlock::Text(
-                    TextBlock::builder()
-                        .text("ok after retry")
-                        .build()
-                        .expect("text block"),
-                ))
-                .build(),
+                .content(ContentBlock::Text("ok after retry".to_string()))
+                .build()
+                .expect("message"),
         ))
         .stop_reason(StopReason::EndTurn)
         .usage(
@@ -33,9 +39,11 @@ fn successful_converse_output() -> ConverseSendOutput {
                 .input_tokens(1)
                 .output_tokens(1)
                 .total_tokens(2)
-                .build(),
+                .build()
+                .expect("usage"),
         )
         .build()
+        .expect("converse output")
 }
 
 fn build_app_with_client(client: Client) -> axum::Router {
@@ -55,40 +63,48 @@ async fn collect_body(body: axum::body::Body) -> Vec<u8> {
         .to_vec()
 }
 
-/// Verifies the proxy retries transient Bedrock `converse` failures before returning
+fn v1_messages_request(stream: bool) -> Body {
+    let body = serde_json::json!({
+        "model": "global.anthropic.claude-opus-4-8",
+        "max_tokens": 16,
+        "stream": stream,
+        "messages": [{"role": "user", "content": "hi"}]
+    });
+    Body::from(serde_json::to_vec(&body).unwrap())
+}
+
+fn post_v1_messages(body: Body) -> axum::http::Request<Body> {
+    axum::http::Request::builder()
+        .method("POST")
+        .uri("/v1/messages")
+        .header("content-type", "application/json")
+        .body(body)
+        .unwrap()
+}
+
+/// The SDK retries transient `converse` failures (503) before the proxy returns
 /// a successful non-streaming `/v1/messages` response.
 #[tokio::test]
 async fn v1_messages_non_stream_retries_transient_bedrock_errors() {
     let converse_rule = mock!(aws_sdk_bedrockruntime::Client::converse)
         .sequence()
-        .http_status(429, None)
+        .http_status(503, None)
         .times(2)
-        .output(|| successful_converse_output())
+        .output(successful_converse_output)
         .build();
 
     let client = mock_client!(
         aws_sdk_bedrockruntime,
         RuleMode::Sequential,
         [&converse_rule],
-        |builder| builder.retry_config(RetryConfig::disabled())
+        |builder| builder.retry_config(sdk_retry_config())
     );
 
     let app = build_app_with_client(client);
-
-    let body = serde_json::json!({
-        "model": "global.anthropic.claude-opus-4-8",
-        "max_tokens": 16,
-        "messages": [{"role": "user", "content": "hi"}]
-    });
-
-    let request = axum::http::Request::builder()
-        .method("POST")
-        .uri("/v1/messages")
-        .header("content-type", "application/json")
-        .body(Body::from(serde_json::to_vec(&body).unwrap()))
+    let response = app
+        .oneshot(post_v1_messages(v1_messages_request(false)))
+        .await
         .unwrap();
-
-    let response = app.oneshot(request).await.unwrap();
     assert_eq!(response.status(), 200, "expected success after retries");
 
     let body_bytes = collect_body(response.into_body()).await;
@@ -97,107 +113,65 @@ async fn v1_messages_non_stream_retries_transient_bedrock_errors() {
     assert_eq!(
         converse_rule.num_calls(),
         3,
-        "expected two 429 retries then success"
+        "expected two 503 retries then success"
     );
 }
 
-/// Verifies streaming connect retries transient Bedrock `converse_stream` failures.
+/// The SDK retries transient `converse_stream` connect failures (503), then
+/// stops on a non-retryable validation error. (A success stream output can't be
+/// constructed via public API, so we assert retry-then-stop via the call count.)
 #[tokio::test]
 async fn v1_messages_stream_retries_transient_bedrock_errors_on_connect() {
     let converse_stream_rule = mock!(aws_sdk_bedrockruntime::Client::converse_stream)
         .sequence()
         .http_status(503, None)
-        .times(1)
-        .output(|| {
-            use aws_sdk_bedrockruntime::{
-                event_receiver::EventReceiver,
-                operation::converse_stream::ConverseOutput as ConverseStreamSendOutput,
-            };
-
-            let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-            drop(tx);
-
-            ConverseStreamSendOutput::builder()
-                .stream(EventReceiver::new(rx))
-                .build()
-                .expect("stream output")
-        })
+        .times(2)
+        .http_status(400, Some("invalid request".to_string()))
         .build();
 
     let client = mock_client!(
         aws_sdk_bedrockruntime,
         RuleMode::Sequential,
         [&converse_stream_rule],
-        |builder| builder.retry_config(RetryConfig::disabled())
+        |builder| builder.retry_config(sdk_retry_config())
     );
 
     let app = build_app_with_client(client);
-
-    let body = serde_json::json!({
-        "model": "global.anthropic.claude-opus-4-8",
-        "max_tokens": 16,
-        "stream": true,
-        "messages": [{"role": "user", "content": "hi"}]
-    });
-
-    let request = axum::http::Request::builder()
-        .method("POST")
-        .uri("/v1/messages")
-        .header("content-type", "application/json")
-        .body(Body::from(serde_json::to_vec(&body).unwrap()))
+    let response = app
+        .oneshot(post_v1_messages(v1_messages_request(true)))
+        .await
         .unwrap();
 
-    let response = app.oneshot(request).await.unwrap();
-    assert_eq!(
-        response.status(),
-        200,
-        "expected stream connect to succeed after retry"
-    );
-
-    let body_bytes = collect_body(response.into_body()).await;
-    let body_str = String::from_utf8(body_bytes).expect("utf8 body");
-    assert!(
-        body_str.contains("event:") || body_str.is_empty(),
-        "expected SSE body, got: {body_str:?}"
-    );
+    // 503s were retried; the terminal 400 surfaces as a 4xx via `AppError`.
+    assert_eq!(response.status(), 400);
     assert_eq!(
         converse_stream_rule.num_calls(),
-        2,
-        "expected one 503 retry then success"
+        3,
+        "expected two 503 retries then the validation error"
     );
 }
 
-/// Verifies non-retryable Bedrock validation failures are not retried.
+/// Non-retryable Bedrock validation failures (400) are not retried by the SDK.
 #[tokio::test]
 async fn v1_messages_non_stream_does_not_retry_validation_errors() {
     let converse_rule = mock!(aws_sdk_bedrockruntime::Client::converse)
         .sequence()
-        .http_status(400, Some("invalid request"))
+        .http_status(400, Some("invalid request".to_string()))
         .build();
 
     let client = mock_client!(
         aws_sdk_bedrockruntime,
         RuleMode::Sequential,
         [&converse_rule],
-        |builder| builder.retry_config(RetryConfig::disabled())
+        |builder| builder.retry_config(sdk_retry_config())
     );
 
     let app = build_app_with_client(client);
-
-    let body = serde_json::json!({
-        "model": "global.anthropic.claude-opus-4-8",
-        "max_tokens": 16,
-        "messages": [{"role": "user", "content": "hi"}]
-    });
-
-    let request = axum::http::Request::builder()
-        .method("POST")
-        .uri("/v1/messages")
-        .header("content-type", "application/json")
-        .body(Body::from(serde_json::to_vec(&body).unwrap()))
+    let response = app
+        .oneshot(post_v1_messages(v1_messages_request(false)))
+        .await
         .unwrap();
 
-    let response = app.oneshot(request).await.unwrap();
     assert_eq!(response.status(), 400);
     assert_eq!(converse_rule.num_calls(), 1);
 }

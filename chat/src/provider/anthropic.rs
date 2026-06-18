@@ -33,10 +33,7 @@ use tokio_stream::wrappers::ReceiverStream;
 use tracing::{error, info};
 use uuid::Uuid;
 
-use crate::{
-    bedrock::BedrockChatCompletion,
-    retry::{RetryPolicy, is_retryable_sdk_error, retry_delay_for_policy},
-};
+use crate::bedrock::BedrockChatCompletion;
 
 const PING_INTERVAL: Duration = Duration::from_secs(20);
 const EVENT_TX_SEND_TIMEOUT: Duration = Duration::from_secs(30);
@@ -342,89 +339,51 @@ enum ConverseStreamConnectOutcome {
 }
 
 /// Races `converse_stream` against the connect window, retrying transient errors
-/// with exponential backoff.
+/// Races `converse_stream`'s connect against the error window. Transient errors
+/// are already retried by the SDK's `standard` strategy before they surface
+/// here, so this only classifies the outcome: a fast connect, a fast error
+/// (becomes a 4xx via `AppError`), or a slow connect that falls to 200 + pings.
 async fn connect_converse_stream(
     client: &Client,
     request: &V1MessagesRequest,
     additional_model_request_fields: Option<Document>,
 ) -> anyhow::Result<ConverseStreamConnectOutcome> {
-    let policy = RetryPolicy::production();
-    let deadline = Instant::now() + CONNECT_ERROR_WINDOW;
-    let mut retry_attempt = 0u32;
+    let bcc = BedrockChatCompletion::try_from(request)?;
+    let mut send_fut = converse_stream_send_fut(client, bcc, additional_model_request_fields);
 
-    loop {
-        let bcc = BedrockChatCompletion::try_from(request)?;
-        let mut send_fut =
-            converse_stream_send_fut(client, bcc, additional_model_request_fields.clone());
-
-        let remaining = deadline.saturating_duration_since(Instant::now());
-        if remaining.is_zero() {
-            return Ok(ConverseStreamConnectOutcome::SlowConnect(send_fut));
+    match timeout(CONNECT_ERROR_WINDOW, &mut send_fut).await {
+        Ok(Ok(response)) => Ok(ConverseStreamConnectOutcome::Connected(Box::new(response))),
+        Ok(Err(e)) => {
+            error!("Bedrock API error: {e:?}");
+            Err(e.into())
         }
-
-        match timeout(remaining, &mut send_fut).await {
-            Ok(Ok(response)) => {
-                return Ok(ConverseStreamConnectOutcome::Connected(Box::new(response)));
-            }
-            Ok(Err(e)) if is_retryable_sdk_error(&e) && retry_attempt < policy.max_attempts => {
-                let delay = retry_delay_for_policy(retry_attempt, &policy);
-                retry_attempt += 1;
-                info!(
-                    "Retryable Bedrock stream error (attempt {retry_attempt}/{}), \
-                     backing off {delay:?}: {e:?}",
-                    policy.max_attempts
-                );
-                let remaining = deadline.saturating_duration_since(Instant::now());
-                if delay >= remaining {
-                    return Err(e.into());
-                }
-                tokio::time::sleep(delay).await;
-            }
-            Ok(Err(e)) => {
-                error!("Bedrock API error: {:?}", e);
-                return Err(e.into());
-            }
-            Err(_) => return Ok(ConverseStreamConnectOutcome::SlowConnect(send_fut)),
-        }
+        Err(_) => Ok(ConverseStreamConnectOutcome::SlowConnect(send_fut)),
     }
 }
 
-async fn converse_with_retry(
+/// Sends one `converse` request. Retries (exponential backoff + jitter +
+/// retry-quota) are handled by the SDK client configured in `main`.
+async fn converse(
     client: &Client,
     request: &V1MessagesRequest,
     additional_model_request_fields: Option<Document>,
 ) -> anyhow::Result<ConverseSendOutput> {
-    let policy = RetryPolicy::production();
-    let mut retry_attempt = 0u32;
-
-    loop {
-        let bcc = BedrockChatCompletion::try_from(request)?;
-        match client
-            .converse()
-            .model_id(bcc.model_id)
-            .set_system(bcc.system_content_blocks)
-            .set_messages(bcc.messages)
-            .set_tool_config(bcc.tool_config)
-            .set_inference_config(Some(bcc.inference_config))
-            .set_additional_model_request_fields(additional_model_request_fields.clone())
-            .set_output_config(bcc.output_config)
-            .send()
-            .await
-        {
-            Ok(output) => return Ok(output),
-            Err(e) if is_retryable_sdk_error(&e) && retry_attempt < policy.max_attempts => {
-                let delay = retry_delay_for_policy(retry_attempt, &policy);
-                retry_attempt += 1;
-                info!(
-                    "Retryable Bedrock converse error (attempt {retry_attempt}/{}), \
-                     backing off {delay:?}: {e:?}",
-                    policy.max_attempts
-                );
-                tokio::time::sleep(delay).await;
-            }
-            Err(e) => return Err(e.into()),
-        }
-    }
+    let bcc = BedrockChatCompletion::try_from(request)?;
+    client
+        .converse()
+        .model_id(bcc.model_id)
+        .set_system(bcc.system_content_blocks)
+        .set_messages(bcc.messages)
+        .set_tool_config(bcc.tool_config)
+        .set_inference_config(Some(bcc.inference_config))
+        .set_additional_model_request_fields(additional_model_request_fields)
+        .set_output_config(bcc.output_config)
+        .send()
+        .await
+        .map_err(|e| {
+            error!("Bedrock Converse API error: {e:?}");
+            e.into()
+        })
 }
 
 fn spawn_converse_stream_processor(
@@ -588,7 +547,7 @@ impl V1MessagesProvider for BedrockV1MessagesProvider {
         let client = &self.bedrockruntime_client;
 
         info!("Sending Anthropic request to Bedrock Converse API (non-streaming)");
-        let output = converse_with_retry(client, &request, additional_model_request_fields).await?;
+        let output = converse(client, &request, additional_model_request_fields).await?;
 
         if let Some(usage) = output.usage() {
             usage_callback(usage);
