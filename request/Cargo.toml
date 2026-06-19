@@ -5,8 +5,8 @@ edition = "2024"
 
 [dependencies]
 anyhow = "1.0.102"
-aws-sdk-bedrockruntime = "1.132.0"
-aws-smithy-types = "1.4.9"
+aws-sdk-bedrockruntime = "1.135.0"
+aws-smithy-types = "1.5.0"
 base64 = "0.22.1"
 common = { path = "../common" }
 serde = { version = "1.0.228", features = ["derive"] }
