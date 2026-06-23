@@ -1673,3 +1673,87 @@ async fn v1_messages_non_stream_echoes_matched_stop_sequence() {
         "content text missing re-injected stop sequence, got: {text:?} (body: {message})"
     );
 }
+
+/// Regression: a user turn carrying two `cache_control` blocks in one content
+/// array (a `tool_result` plus a trailing `text` instruction — the shape
+/// Claude Code emits before an anchored-summary turn) used to emit two Bedrock
+/// `CachePoint` blocks in one array and fail with a cache-point validation
+/// error. The proxy now collapses them to the last cache point, so this must
+/// stream a normal 200 SSE response.
+#[tokio::test]
+#[ignore]
+async fn v1_messages_two_cache_points_in_one_array_streams() {
+    let app = build_app().await;
+
+    let body = serde_json::json!({
+        "model": OPUS_4_8,
+        "max_tokens": 64,
+        "stream": true,
+        "tools": [
+            {
+                "name": "do_something",
+                "description": "Does something and returns nothing.",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {},
+                    "required": []
+                }
+            }
+        ],
+        "messages": [
+            {"role": "user", "content": "Call do_something."},
+            {
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "id": "tooluse_cache1",
+                        "name": "do_something",
+                        "input": {}
+                    }
+                ]
+            },
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "tooluse_cache1",
+                        "content": "Edit applied successfully.",
+                        "cache_control": {"type": "ephemeral"}
+                    },
+                    {
+                        "type": "text",
+                        "text": "Now say hi in exactly one word.",
+                        "cache_control": {"type": "ephemeral"}
+                    }
+                ]
+            }
+        ]
+    });
+
+    let request = axum::http::Request::builder()
+        .method("POST")
+        .uri("/v1/messages")
+        .header("content-type", "application/json")
+        .body(Body::from(serde_json::to_vec(&body).unwrap()))
+        .unwrap();
+
+    let response = app.oneshot(request).await.unwrap();
+    let status = response.status();
+
+    let body_str = String::from_utf8(collect_body(response.into_body()).await).unwrap();
+    assert_eq!(
+        status, 200,
+        "two cache points in one array should not error; body: {body_str}"
+    );
+
+    let events = parse_sse_events(&body_str);
+    let event_types: Vec<&str> = events.iter().map(|(e, _)| e.as_str()).collect();
+    assert_eq!(
+        event_types.first(),
+        Some(&"message_start"),
+        "expected a streamed response, got: {event_types:?}"
+    );
+    assert_eq!(event_types.last(), Some(&"message_stop"));
+}

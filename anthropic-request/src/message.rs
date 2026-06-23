@@ -162,6 +162,45 @@ mod tests {
     }
 
     #[test]
+    fn tool_result_and_text_both_cached_collapse_to_one_cache_point() {
+        // Reproduces the payload that triggered the Bedrock cache-point error:
+        // a tool_result and a trailing text block in one user message both carry
+        // cache_control, which would emit two CachePoint blocks in one array.
+        let json = serde_json::json!({
+            "role": "user",
+            "content": [
+                {
+                    "type": "tool_result",
+                    "tool_use_id": "tooluse_1",
+                    "content": "Edit applied successfully.",
+                    "cache_control": {"type": "ephemeral"}
+                },
+                {
+                    "type": "text",
+                    "text": "Create a new anchored summary...",
+                    "cache_control": {"type": "ephemeral"}
+                }
+            ]
+        });
+        let message: Message = serde_json::from_value(json).unwrap();
+        let bedrock = message.to_bedrock_message(&DocumentCounter::new()).unwrap();
+
+        let cache_points = bedrock
+            .content()
+            .iter()
+            .filter(|b| matches!(b, ContentBlock::CachePoint(_)))
+            .count();
+        assert_eq!(cache_points, 1, "expected exactly one cache point");
+
+        // The surviving cache point is the last block (caches the largest prefix).
+        let content = bedrock.content();
+        assert!(matches!(
+            content[content.len() - 1],
+            ContentBlock::CachePoint(_)
+        ));
+    }
+
+    #[test]
     fn messages_string_to_bedrock() {
         let json = serde_json::json!("just a string");
         let messages: Messages = serde_json::from_value(json).unwrap();
