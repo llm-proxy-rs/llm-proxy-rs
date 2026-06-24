@@ -54,22 +54,46 @@ impl UserContents {
     ) -> anyhow::Result<Vec<ContentBlock>> {
         match self {
             UserContents::String(s) => Ok(vec![ContentBlock::Text(s.clone())]),
-            UserContents::Array(arr) => Ok(arr
-                .iter()
-                .map(|c| c.to_content_blocks(counter))
-                .collect::<Result<Vec<_>, _>>()?
-                .into_iter()
-                .flatten()
-                .flatten()
-                .collect()),
+            UserContents::Array(arr) => {
+                // Bedrock rejects more than one cache point in a single content
+                // array, so only the last block that carries `cache_control`
+                // emits a cache point — it caches the largest prefix.
+                let last_cache_control = arr.iter().rposition(UserContent::has_cache_control);
+
+                Ok(arr
+                    .iter()
+                    .enumerate()
+                    .map(|(index, c)| {
+                        c.to_content_blocks(counter, last_cache_control == Some(index))
+                    })
+                    .collect::<Result<Vec<_>, _>>()?
+                    .into_iter()
+                    .flatten()
+                    .flatten()
+                    .collect())
+            }
         }
     }
 }
 
 impl UserContent {
+    fn has_cache_control(&self) -> bool {
+        matches!(
+            self,
+            UserContent::Text {
+                cache_control: Some(_),
+                ..
+            } | UserContent::ToolResult {
+                cache_control: Some(_),
+                ..
+            }
+        )
+    }
+
     fn to_content_blocks(
         &self,
         counter: &DocumentCounter,
+        emit_cache_point: bool,
     ) -> anyhow::Result<Option<Vec<ContentBlock>>> {
         match self {
             UserContent::Text {
@@ -78,7 +102,7 @@ impl UserContent {
             } => {
                 let mut blocks = vec![ContentBlock::Text(text.clone())];
 
-                if let Some(cache_control) = cache_control {
+                if emit_cache_point && let Some(cache_control) = cache_control {
                     let cache_point = cache_control.try_into()?;
                     blocks.push(ContentBlock::CachePoint(cache_point));
                 }
@@ -118,7 +142,7 @@ impl UserContent {
 
                 let mut blocks = vec![ContentBlock::ToolResult(tool_result_block)];
 
-                if let Some(cache_control) = cache_control {
+                if emit_cache_point && let Some(cache_control) = cache_control {
                     let cache_point = cache_control.try_into()?;
                     blocks.push(ContentBlock::CachePoint(cache_point));
                 }
@@ -222,5 +246,36 @@ mod tests {
             other => panic!("expected ToolResult, got {:?}", other),
         }
         assert!(matches!(blocks[1], ContentBlock::CachePoint(_)));
+    }
+
+    #[test]
+    fn multiple_cache_controls_emit_only_last_cache_point() {
+        // tool_result and a trailing text both marked — the converter must emit
+        // a single cache point, for the last marked block (the text).
+        let json = serde_json::json!([
+            {
+                "type": "tool_result",
+                "tool_use_id": "t1",
+                "content": "Edit applied successfully.",
+                "cache_control": {"type": "ephemeral"}
+            },
+            {
+                "type": "text",
+                "text": "Create a new anchored summary...",
+                "cache_control": {"type": "ephemeral"}
+            }
+        ]);
+        let contents: UserContents = serde_json::from_value(json).unwrap();
+        let blocks = contents.to_content_blocks(&DocumentCounter::new()).unwrap();
+
+        let cache_points = blocks
+            .iter()
+            .filter(|b| matches!(b, ContentBlock::CachePoint(_)))
+            .count();
+        assert_eq!(cache_points, 1);
+        // Original order is preserved: [ToolResult, Text, CachePoint].
+        assert!(matches!(&blocks[0], ContentBlock::ToolResult(_)));
+        assert!(matches!(&blocks[1], ContentBlock::Text(t) if t.starts_with("Create")));
+        assert!(matches!(blocks[2], ContentBlock::CachePoint(_)));
     }
 }
