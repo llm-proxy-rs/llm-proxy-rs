@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-anyhow = "1.0.102"
+anyhow = "1.0.103"
 anthropic-request = { path = "../anthropic-request" }
 anthropic-response = { path = "../anthropic-response" }
 aws-config = "1.8.18"
@@ -12,7 +12,7 @@ aws-sdk-bedrockruntime = "1.135.0"
 axum = "0.8.9"
 chat = { path = "../chat" }
 common = { path = "../common" }
-config = "0.15.24"
+config = "0.15.25"
 request = { path = "../request" }
 response = { path = "../response" }
 tokio = { version = "1.52.3", features = ["full"] }
