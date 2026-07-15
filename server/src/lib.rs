@@ -1,5 +1,7 @@
+use aws_credential_types::provider::SharedCredentialsProvider;
 use aws_sdk_bedrockruntime::Client;
 use axum::{Router, routing::post};
+use reqwest::Client as HttpClient;
 use std::sync::Arc;
 
 pub mod error;
@@ -14,8 +16,8 @@ pub struct AppState {
     pub inference_profile_prefixes: Vec<String>,
     pub anthropic_beta_whitelist: Vec<String>,
     pub aws_region: String,
-    pub credentials_provider: aws_credential_types::provider::SharedCredentialsProvider,
-    pub http_client: reqwest::Client,
+    pub credentials_provider: SharedCredentialsProvider,
+    pub http_client: HttpClient,
 }
 
 pub fn get_app(state: Arc<AppState>) -> Router {

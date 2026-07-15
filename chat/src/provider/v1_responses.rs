@@ -5,7 +5,11 @@ use crate::bedrock::mantle;
 
 #[async_trait]
 pub trait V1ResponsesProvider {
-    async fn v1_responses_stream(self, body: Vec<u8>) -> anyhow::Result<reqwest::Response>;
+    async fn v1_responses_stream(
+        self,
+        body: Vec<u8>,
+        project: Option<&str>,
+    ) -> anyhow::Result<reqwest::Response>;
 }
 
 pub struct MantleV1ResponsesProvider {
@@ -30,12 +34,17 @@ impl MantleV1ResponsesProvider {
 
 #[async_trait]
 impl V1ResponsesProvider for MantleV1ResponsesProvider {
-    async fn v1_responses_stream(self, body: Vec<u8>) -> anyhow::Result<reqwest::Response> {
+    async fn v1_responses_stream(
+        self,
+        body: Vec<u8>,
+        project: Option<&str>,
+    ) -> anyhow::Result<reqwest::Response> {
         mantle::v1_responses_stream(
             &self.http_client,
             &self.credentials_provider,
             &self.region,
             body,
+            project,
         )
         .await
     }

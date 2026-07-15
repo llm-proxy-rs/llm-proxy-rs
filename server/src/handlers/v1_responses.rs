@@ -2,7 +2,7 @@ use anyhow::anyhow;
 use axum::{
     body::{Body, Bytes},
     extract::State,
-    http::{StatusCode, header::CONTENT_TYPE},
+    http::{HeaderMap, StatusCode, header::CONTENT_TYPE},
     response::Response,
 };
 use chat::provider::{MantleV1ResponsesProvider, V1ResponsesProvider};
@@ -12,8 +12,12 @@ use tracing::{error, info};
 use crate::{AppState, error::AppError};
 
 /// Transparent passthrough to Bedrock Mantle's OpenAI Responses API.
+///
+/// Clients may optionally send `OpenAI-Project` to associate the request with a
+/// Bedrock Mantle project (access isolation and cost tracking).
 pub async fn handle_v1_responses(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     body: Bytes,
 ) -> Result<Response, AppError> {
     let model = serde_json::from_slice::<serde_json::Value>(&body)
@@ -24,9 +28,14 @@ pub async fn handle_v1_responses(
                 .and_then(|m| m.as_str())
                 .map(str::to_owned)
         });
+    let project = headers
+        .get("openai-project")
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_owned);
     info!(
-        "Received OpenAI Responses API request for model: {}",
-        model.as_deref().unwrap_or("unknown")
+        "Received OpenAI Responses API request for model: {}, project: {}",
+        model.as_deref().unwrap_or("unknown"),
+        project.as_deref().unwrap_or("default")
     );
 
     let provider = MantleV1ResponsesProvider::new(
@@ -34,7 +43,9 @@ pub async fn handle_v1_responses(
         state.aws_region.clone(),
         state.credentials_provider.clone(),
     );
-    let upstream = provider.v1_responses_stream(body.to_vec()).await?;
+    let upstream = provider
+        .v1_responses_stream(body.to_vec(), project.as_deref())
+        .await?;
 
     let status =
         StatusCode::from_u16(upstream.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);

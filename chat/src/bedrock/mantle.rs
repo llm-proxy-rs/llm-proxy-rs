@@ -52,11 +52,15 @@ async fn sign_bedrock_json_post(
 }
 
 /// POSTs an OpenAI Responses body to Bedrock Mantle with SigV4 auth.
+///
+/// When `project` is set, sends the `OpenAI-Project` header so Bedrock associates
+/// the request with an account project for isolation and cost tracking.
 pub async fn v1_responses_stream(
     http_client: &reqwest::Client,
     credentials_provider: &SharedCredentialsProvider,
     region: &str,
     body: Vec<u8>,
+    project: Option<&str>,
 ) -> anyhow::Result<reqwest::Response> {
     let url = bedrock_mantle_url(region, RESPONSES_PATH);
     let signed_headers = sign_bedrock_json_post(credentials_provider, region, &url, &body).await?;
@@ -66,6 +70,9 @@ pub async fn v1_responses_stream(
         .header("content-type", "application/json");
     for (name, value) in signed_headers {
         request = request.header(name, value);
+    }
+    if let Some(project) = project {
+        request = request.header("OpenAI-Project", project);
     }
 
     Ok(request.body(body).send().await?)
