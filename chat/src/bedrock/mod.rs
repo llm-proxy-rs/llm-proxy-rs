@@ -2,8 +2,8 @@ use aws_sdk_bedrockruntime::types::{
     InferenceConfiguration, Message, OutputConfig, SystemContentBlock, ToolConfiguration,
 };
 
-pub mod anthropic;
-pub mod openai;
+pub mod converse;
+pub mod mantle;
 
 pub struct BedrockChatCompletion {
     pub model_id: String,

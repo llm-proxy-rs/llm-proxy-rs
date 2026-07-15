@@ -1,6 +1,8 @@
 [workspace]
 
+resolver = "3"
+
 members = [
     "anthropic-request", "anthropic-response", "chat", "common",
-    "request", "response", "server",
+    "server",
 ]

@@ -51,6 +51,17 @@ fn build_app_with_client(client: Client) -> axum::Router {
         bedrockruntime_client: client,
         inference_profile_prefixes: vec!["us.".to_string(), "global.".to_string()],
         anthropic_beta_whitelist: vec![],
+        aws_region: "us-east-1".to_string(),
+        credentials_provider: aws_credential_types::provider::SharedCredentialsProvider::new(
+            aws_credential_types::Credentials::new(
+                "test",
+                "test",
+                None,
+                None,
+                "retry-integration-test",
+            ),
+        ),
+        http_client: reqwest::Client::new(),
     });
     get_app(state)
 }
