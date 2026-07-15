@@ -196,18 +196,20 @@ impl UsageScanner {
     }
 }
 
+fn i32_from_json(v: &Value) -> Option<i32> {
+    i32::try_from(v.as_i64()?).ok()
+}
+
 fn token_usage_from_openai(usage: &Value) -> Option<TokenUsage> {
-    let input_tokens = usage.get("input_tokens")?.as_i64()? as i32;
-    let output_tokens = usage.get("output_tokens")?.as_i64()? as i32;
+    let input_tokens = usage.get("input_tokens").and_then(i32_from_json)?;
+    let output_tokens = usage.get("output_tokens").and_then(i32_from_json)?;
     let total_tokens = usage
         .get("total_tokens")
-        .and_then(|v| v.as_i64())
-        .map(|v| v as i32)
+        .and_then(i32_from_json)
         .unwrap_or(input_tokens.saturating_add(output_tokens));
     let cache_read_input_tokens = usage
         .pointer("/input_tokens_details/cached_tokens")
-        .and_then(|v| v.as_i64())
-        .map(|v| v as i32);
+        .and_then(i32_from_json);
 
     TokenUsage::builder()
         .input_tokens(input_tokens)
@@ -313,5 +315,22 @@ mod tests {
             "\n\n",
         );
         assert!(collect_usage(&[event.as_bytes()], UsageScanMode::Sse).is_none());
+    }
+
+    #[test]
+    fn rejects_usage_outside_i32_range() {
+        let body =
+            br#"{"usage":{"input_tokens":3000000000,"output_tokens":1,"total_tokens":3000000001}}"#;
+        assert!(collect_usage(&[body], UsageScanMode::Json).is_none());
+    }
+
+    #[test]
+    fn falls_back_total_and_skips_out_of_range_cache() {
+        let body = br#"{"usage":{"input_tokens":10,"output_tokens":20,"input_tokens_details":{"cached_tokens":3000000000}}}"#;
+        let usage = collect_usage(&[body], UsageScanMode::Json).expect("usage");
+        assert_eq!(usage.input_tokens, 10);
+        assert_eq!(usage.output_tokens, 20);
+        assert_eq!(usage.total_tokens, 30);
+        assert_eq!(usage.cache_read_input_tokens, None);
     }
 }
