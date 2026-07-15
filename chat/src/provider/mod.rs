@@ -1,5 +1,5 @@
-pub mod anthropic;
-pub mod openai;
+pub mod v1_messages;
+pub mod v1_responses;
 
-pub use anthropic::*;
-pub use openai::*;
+pub use v1_messages::*;
+pub use v1_responses::*;

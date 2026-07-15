@@ -66,10 +66,22 @@ async fn main() -> anyhow::Result<()> {
     let bedrockruntime_client = Client::new(&aws_config);
     info!("AWS Bedrock client initialized");
 
+    let aws_region = aws_config
+        .region()
+        .map(|r| r.to_string())
+        .unwrap_or_else(|| "us-east-1".to_string());
+    let credentials_provider = aws_config
+        .credentials_provider()
+        .ok_or_else(|| anyhow::anyhow!("No AWS credentials provider configured"))?;
+    let http_client = reqwest::Client::new();
+
     let state = Arc::new(AppState {
         bedrockruntime_client,
         inference_profile_prefixes,
         anthropic_beta_whitelist,
+        aws_region,
+        credentials_provider,
+        http_client,
     });
 
     info!("Routes configured, binding to {}:{}", host, port);
