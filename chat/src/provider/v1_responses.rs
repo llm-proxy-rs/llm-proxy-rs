@@ -7,8 +7,19 @@ use futures::stream::{BoxStream, StreamExt};
 use serde_json::Value;
 use std::sync::Arc;
 use std::task::{Context, Poll};
+use std::time::Duration;
+use tokio::{
+    sync::mpsc,
+    time::{Instant, interval_at, timeout},
+};
+use tokio_stream::wrappers::ReceiverStream;
+use tracing::{error, info};
 
 use crate::bedrock::mantle;
+
+const PING_INTERVAL: Duration = Duration::from_secs(20);
+const EVENT_TX_SEND_TIMEOUT: Duration = Duration::from_secs(30);
+const PING_FRAME: &[u8] = b"event: ping\ndata: {\"type\": \"ping\"}\n\n";
 
 pub struct V1ResponsesUpstream {
     pub status: reqwest::StatusCode,
@@ -76,7 +87,13 @@ impl V1ResponsesProvider for MantleV1ResponsesProvider {
             .unwrap_or("application/json")
             .to_string();
         let mode = UsageScanMode::from_content_type(&content_type);
-        let body = tap_responses_usage(upstream.bytes_stream(), mode, usage_callback).boxed();
+        let is_sse = matches!(mode, UsageScanMode::Sse);
+        let scanned = tap_responses_usage(upstream.bytes_stream(), mode, usage_callback);
+        let body = if is_sse {
+            with_sse_pings(scanned).boxed()
+        } else {
+            scanned.boxed()
+        };
 
         Ok(V1ResponsesUpstream {
             status,
@@ -254,6 +271,59 @@ where
     })
 }
 
+/// Injects Anthropic-style SSE ping frames while the upstream Responses stream
+/// is idle, so proxies/clients do not drop the connection.
+fn with_sse_pings<S>(stream: S) -> impl Stream<Item = Result<Bytes, reqwest::Error>> + Send
+where
+    S: Stream<Item = Result<Bytes, reqwest::Error>> + Send + 'static,
+{
+    let (tx, rx) = mpsc::channel(16);
+    tokio::spawn(async move {
+        let mut stream = Box::pin(stream.fuse());
+        let mut ping_interval = interval_at(Instant::now() + PING_INTERVAL, PING_INTERVAL);
+        loop {
+            tokio::select! {
+                biased;
+                next = stream.next() => {
+                    match next {
+                        Some(item) => {
+                            if !send_chunk(&tx, item).await {
+                                return;
+                            }
+                        }
+                        None => return,
+                    }
+                }
+                _ = ping_interval.tick() => {
+                    info!("Sending ping event");
+                    if !send_chunk(&tx, Ok(Bytes::from_static(PING_FRAME))).await {
+                        return;
+                    }
+                }
+            }
+        }
+    });
+    ReceiverStream::new(rx)
+}
+
+/// Forwards a chunk to the consumer. Returns false if the consumer is gone or stuck.
+async fn send_chunk(
+    tx: &mpsc::Sender<Result<Bytes, reqwest::Error>>,
+    item: Result<Bytes, reqwest::Error>,
+) -> bool {
+    match timeout(EVENT_TX_SEND_TIMEOUT, tx.send(item)).await {
+        Ok(Ok(())) => true,
+        Ok(Err(_)) => {
+            info!("SSE client disconnected, stopping Responses stream");
+            false
+        }
+        Err(_) => {
+            error!("Channel send timed out, consumer likely stuck");
+            false
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -332,5 +402,40 @@ mod tests {
         assert_eq!(usage.output_tokens, 20);
         assert_eq!(usage.total_tokens, 30);
         assert_eq!(usage.cache_read_input_tokens, None);
+    }
+
+    #[test]
+    fn ping_frame_matches_anthropic_keepalive_format() {
+        assert_eq!(PING_FRAME, b"event: ping\ndata: {\"type\": \"ping\"}\n\n");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn injects_ping_while_upstream_idle() {
+        let (upstream_tx, upstream_rx) = mpsc::channel::<Result<Bytes, reqwest::Error>>(4);
+        let mut stream = Box::pin(with_sse_pings(ReceiverStream::new(upstream_rx)));
+
+        // Let the relay task start and register its ping timer before advancing.
+        tokio::task::yield_now().await;
+        tokio::time::advance(PING_INTERVAL).await;
+
+        let ping = stream
+            .next()
+            .await
+            .expect("stream ended")
+            .expect("ping errored");
+        assert_eq!(ping.as_ref(), PING_FRAME);
+
+        upstream_tx
+            .send(Ok(Bytes::from_static(
+                b"event: response.created\ndata: {}\n\n",
+            )))
+            .await
+            .unwrap();
+        let chunk = stream
+            .next()
+            .await
+            .expect("stream ended")
+            .expect("chunk errored");
+        assert_eq!(chunk.as_ref(), b"event: response.created\ndata: {}\n\n");
     }
 }
